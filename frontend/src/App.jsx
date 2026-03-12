@@ -192,8 +192,8 @@ function AssetPopup({ assetId, status }) {
 
   if (!data) return <div style={{ minWidth: '220px' }}>Loading...</div>
 
-  const statusColor = status === 0 ? 'green' : status === 1 ? 'red' : 'gray'
-  const statusLabel = status === 0 ? 'Not discharging' : status === 1 ? 'Discharging' : 'Monitor Offline'
+  const statusColor = data.status === 0 ? 'green' : data.status === 1 ? 'red' : 'gray'
+  const statusLabel = data.status === 0 ? 'Not discharging' : data.status === 1 ? 'Discharging' : 'Monitor Offline'
 
   const nearestBathingWaterName = data.nearest_bathing_water_name
   const nearestBathingWaterDistance = data.nearest_bathing_water_distance
@@ -243,11 +243,20 @@ function AssetPopup({ assetId, status }) {
               Active for: <span style={{ fontWeight: '600' }}>{hoursActive}h</span>
             </p>
           )}
-          {data.nearest_bathing_water_id !== null && (
+          {data.nearest_bathing_water_id && (
               <p className='text-sm text-gray-500 mt-1'>
                 Nearest Bathing Water: <b>{nearestBathingWaterName}</b> ({nearestBathingWaterDistance}m{nearestBathingWaterDistance > 1609 ? ` / ${(nearestBathingWaterDistance/1609).toFixed(2)}mi` : ""}) - <b className={`${nearestBathingWaterColour}`}>{data.nearest_bathing_water_classification}</b>
             </p>
           )}
+          <a href={`https://earth.google.com/web/search/${data.latitude},${data.longitude}/`} className='mt-2' target='_blank'>
+            <button className="p-2 bg-blue-600 rounded-lg text-white cursor-pointer">Open in Google Earth</button>
+          </a>
+          {nearestBathingWaterName != null && (
+            <a href={`https://environment.data.gov.uk/bwq/profiles/profile.html?site=${data.nearest_bathing_water_id}`} className='mt-2' target='_blank'>
+              <button className="p-2 bg-green-600 rounded-lg text-white cursor-pointer">Open Bathing Water Quality Info (EA)</button>
+            </a>
+          )}
+
         </div>
       )}
 
