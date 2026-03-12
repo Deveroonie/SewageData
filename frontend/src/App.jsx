@@ -3,7 +3,7 @@ import Map, { Source, Layer, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-const base = "http://localhost:8080"
+const base = "https://api.poo.deveroonie.co.uk"
 
 
 function App() {
