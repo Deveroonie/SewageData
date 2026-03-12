@@ -57,7 +57,7 @@ func main() {
 	r.GET("/api/asset/:id", getAsset)
 	r.GET("/api/asset/:id/events", getAssetEvents)
 	r.GET("/api/stats", getStats)
-
+	r.GET("/api/top-discharges", getTopDischarges)
 	r.Run(":8080")
 }
 
@@ -264,6 +264,47 @@ ORDER BY percent_active DESC`)
 
 	c.JSON(200, stats)
 }
+func getTopDischarges(c *gin.Context) {
+	rows, err := db.Query(`SELECT a.asset_id,
+	a.company,
+    a.receiving_watercourse,
+    l.latest_event_start
+FROM assets a
+INNER JOIN latest_state l ON l.asset_id = a.asset_id
+WHERE l.status = 1
+ORDER BY l.latest_event_start
+LIMIT 20
+`)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	var response TopDischargingStats
+	for rows.Next() {
+		var assetId string
+		var company string
+		var receivingWatercourse string
+		var dischargeStart time.Time
+
+		err := rows.Scan(&assetId, &company, &receivingWatercourse, &dischargeStart)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+		}
+
+		asset := TopDischarge{
+			assetId,
+			company,
+			receivingWatercourse,
+			dischargeStart,
+		}
+
+		response.Discharges = append(response.Discharges, asset)
+	}
+
+	c.JSON(200, response)
+}
 
 func fetchConfig(path string) Config {
 	data, err := os.ReadFile(path)
@@ -331,6 +372,17 @@ type StatsCompanies struct {
 	TotalDischarging int     `json:"total_discharging"`
 	TotalOffline     int     `json:"total_offline"`
 	PercentActive    float64 `json:"percent_active"`
+}
+
+type TopDischargingStats struct {
+	Discharges []TopDischarge `json:"discharges"`
+}
+
+type TopDischarge struct {
+	AssetID              string    `json:"asset_id"`
+	Company              string    `json:"company"`
+	ReceivingWaterCourse string    `json:"receiving_watercourse"`
+	DischargeStart       time.Time `json:"discharge_start"`
 }
 
 type Config struct {
