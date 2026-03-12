@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
 )
@@ -49,6 +50,7 @@ func main() {
 	fmt.Println("Connected!")
 
 	r := gin.Default()
+	r.Use(cors.Default())
 	r.Use(gzip.Gzip(gzip.DefaultCompression))
 
 	r.GET("/api/assets", getAssets)
