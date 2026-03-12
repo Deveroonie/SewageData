@@ -3,6 +3,8 @@ import Map, { Source, Layer, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+const base = "http://localhost:8080"
+
 
 function App() {
 
@@ -12,8 +14,8 @@ function App() {
 
     useEffect(() => {
         async function fetchData() {
-            const data = (await axios.get("https://api.poo.deveroonie.co.uk/api/stats")).data
-            const assetData = (await axios.get("https://api.poo.deveroonie.co.uk/api/assets")).data.assets
+            const data = (await axios.get(base+"/api/stats")).data
+            const assetData = (await axios.get(base+"/api/assets")).data.assets
             setStats(data)
             setAssets(assetData)
         }
@@ -27,7 +29,7 @@ function App() {
         features: assets.map(asset => ({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [asset.longitude, asset.latitude] },
-            properties: { status: asset.status, name: asset.name, asset_id: asset.asset_id }
+            properties: { status: (asset.status != 0 ? asset.status : minutesAgo(new Date(asset.latest_event_end)) < 2880 ? 2 : 0), name: asset.name, asset_id: asset.asset_id }
         }))
     }
 
@@ -36,7 +38,7 @@ function App() {
         type: 'circle',
         paint: {
             'circle-radius': 4,
-            'circle-color': ['match', ['get', 'status'], 0, 'green', 1, 'red', 'gray'],
+            'circle-color': ['match', ['get', 'status'], 0, 'green', 1, 'red', 2, 'yellow', 'gray'],
             'circle-opacity': 0.85
             //'circle-sort-key': ['match', ['get', 'status'], 0, 0, 1, 2, 1],
         }
@@ -55,7 +57,7 @@ function App() {
           </div>
           <div className="grow">
             <Map
-            initialViewState={{ longitude: -0.1276, latitude: 51.5074, zoom: 10 }}
+            initialViewState={{ longitude: -2.5, latitude: 54.5, zoom: 5 }}
             style={{ width: '100%', height: '100%' }}
             mapStyle="https://tiles.openfreemap.org/styles/liberty"
             onClick={e => {
@@ -178,9 +180,9 @@ function AssetPopup({ assetId, status }) {
     setData(null)
     setEvents(null)
     setTab('info')
-    axios.get(`https://api.poo.deveroonie.co.uk/api/asset/${assetId}`)
+    axios.get(`${base}/api/asset/${assetId}`)
       .then(res => setData(res.data))
-    axios.get(`https://api.poo.deveroonie.co.uk/api/asset/${assetId}/events`)
+    axios.get(`${base}/api/asset/${assetId}/events`)
       .then(res => {
         const ev = res.data.events ?? res.data
         setEvents(Array.isArray(ev) ? ev : [])
@@ -192,6 +194,11 @@ function AssetPopup({ assetId, status }) {
 
   const statusColor = status === 0 ? 'green' : status === 1 ? 'red' : 'gray'
   const statusLabel = status === 0 ? 'Not discharging' : status === 1 ? 'Discharging' : 'Monitor Offline'
+
+  const nearestBathingWaterName = data.nearest_bathing_water_name
+  const nearestBathingWaterDistance = data.nearest_bathing_water_distance
+  const nearestBathingWaterClassification = data.nearest_bathing_water_classification
+  const nearestBathingWaterColour = nearestBathingWaterClassification == "Poor" ? "text-red-500" : nearestBathingWaterClassification == "Sufficient" ? "text-orange-500" : nearestBathingWaterClassification == "Good" ? "text-green-500" : nearestBathingWaterClassification == "Closed" ? "text-gray-500" : "text-blue-500"
 
   const hoursActive = data.latest_event_start
     // eslint-disable-next-line react-hooks/purity
@@ -236,6 +243,11 @@ function AssetPopup({ assetId, status }) {
               Active for: <span style={{ fontWeight: '600' }}>{hoursActive}h</span>
             </p>
           )}
+          {data.nearest_bathing_water_id !== null && (
+              <p className='text-sm text-gray-500 mt-1'>
+                Nearest Bathing Water: <b>{nearestBathingWaterName}</b> ({nearestBathingWaterDistance}m{nearestBathingWaterDistance > 1609 ? ` / ${(nearestBathingWaterDistance/1609).toFixed(2)}mi` : ""}) - <b className={`${nearestBathingWaterColour}`}>{data.nearest_bathing_water_classification}</b>
+            </p>
+          )}
         </div>
       )}
 
@@ -269,4 +281,11 @@ function AssetPopup({ assetId, status }) {
   )
 }
 
+function minutesAgo(date) {
+  const now = new Date();
+  const diffMs = now - new Date(date);
+  return Math.floor(diffMs / 1000 / 60);
+}
+
 export default App
+
