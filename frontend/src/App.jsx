@@ -141,12 +141,13 @@ function App() {
           </tbody>
         </table>
       </div>
-            <div className='shrink-0 bg-brown text-white p-8 text-center'>
+            <div className='shrink-0 bg-brown text-white px-16 py-8 text-center'>
             <span className='text-3xl font-bold'>Poo</span>
-            <p className='text-xl font-semibold'>&copy; 2026 <a href='https://deveroonie.co.uk'>Deveroonie</a>. All rights reserved</p>
-            <span className='text-lg'>Uses data from<br /></span>
+            <p className='text-xl font-semibold'>&copy; 2026 <a href='https://deveroonie.co.uk'>Deveroonie</a>. Licensed under MIT.</p>
+            <p className='text-lg font-semibold'>This website is <a href='https://github.com/Deveroonie/poo/' className='underline'>open source</a>.</p>
+            <span className='text-lg'>Water Data from:<br /></span>
               <span className='text-sm'>
-                <a href='https://www.streamwaterdata.co.uk/'>Stream Water Data</a>,
+                <a href='https://www.streamwaterdata.co.uk/'>Stream Water Data (CC-BY-SA 4.0)</a>,
                 Anglian Water Services Limited,
                 Dŵr Cymru Cyf,
                 Northumbrian Water Ltd,&nbsp;
@@ -159,7 +160,9 @@ function App() {
                 Wessex Water Services Limited,
                 Yorkshire Water Services Limited
               </span>
-            <span className='text-lg'><br />Map Data provided by<br /></span>
+            <span className='text-lg'><br />Bathing Water Data:<br /></span>
+            <span className='text-sm'>Contains Environment Agency information © Environment Agency and database right. Licensed under <a href='https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/'>Open Government Licence (OGL) v3</a></span>
+            <span className='text-lg'><br />Map Data provided by:<br /></span>
             <span className='text-sm'>
               <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>,&nbsp;
               <a href='https://openmaptiles.org/'>OpenMapTiles</a>,&nbsp;
