@@ -10,14 +10,17 @@ function App() {
 
     const [stats,setStats] = useState(null)
     const [assets,setAssets] = useState(null)
+    const [topDischarges,setTopDischarges] = useState(null)
     const [selectedAsset, setSelectedAsset] = useState(null)
 
     useEffect(() => {
         async function fetchData() {
             const data = (await axios.get(base+"/api/stats")).data
             const assetData = (await axios.get(base+"/api/assets")).data.assets
+            const dischargesData = (await axios.get(base+"/api/top-discharges")).data.discharges
             setStats(data)
             setAssets(assetData)
+            setTopDischarges(dischargesData)
         }
         fetchData()
     }, [])
@@ -93,6 +96,7 @@ function App() {
           </Map>
           </div>
       </div>
+      {/* Refactor */}
       <h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Overflows by Company</h2>
       <div className='flex flex-col items-center px-4 pb-8'>
         <table className='w-full max-w-4xl text-sm border-collapse'>
@@ -138,6 +142,31 @@ function App() {
                 </tr>
                 )
             })()}
+          </tbody>
+        </table>
+      </div>
+      <h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Top Active CSOs</h2>
+      <div className='flex flex-col items-center px-4 pb-8'>
+        <table className='w-full max-w-4xl text-sm border-collapse'>
+          <thead>
+            <tr className='bg-gray-100 text-gray-700 uppercase text-xs tracking-wide'>
+              <th className='text-left px-4 py-2 border border-gray-200'>Company</th>
+              <th className='text-right px-4 py-2 border border-gray-200'>Receiving Watercourse</th>
+              <th className='text-right px-4 py-2 border border-gray-200'>Discharge Started</th>
+              <th className='text-right px-4 py-2 border border-gray-200'>Duration (Hours)</th>
+              <th className='text-right px-4 py-2 border border-gray-200'>Duration (Days)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {topDischarges.map((discharge, i) => (
+              <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                <td className='px-4 py-2 border border-gray-200 font-medium'>{discharge.company}</td>
+                <td className='px-4 py-2 border border-gray-200 font-medium'>{discharge.receiving_watercourse}</td>
+                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{new Date(discharge.discharge_start).toLocaleDateString()}</td>
+                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{(minutesAgo(new Date(discharge.discharge_start))/60).toFixed(2)}</td>
+                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{(minutesAgo(new Date(discharge.discharge_start))/1440).toFixed(2)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
