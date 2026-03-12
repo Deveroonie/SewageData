@@ -16,11 +16,19 @@ import "github.com/gin-contrib/gzip"
 var db *sql.DB
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatal("usage: cso-poller <config-path>")
+	dev := os.Getenv("API_IS_DEV")
+
+	var config Config
+
+	if dev != "" {
+		config = fetchConfig("./config.json")
+	} else {
+		if len(os.Args) < 2 {
+			log.Fatal("usage: cso-poller <config-path>")
+		}
+		config = fetchConfig(os.Args[1])
 	}
-	config := fetchConfig(os.Args[1])
-	//config := fetchConfig("./config.json")
+
 	cfg := mysql.NewConfig()
 	cfg.User = config.DBUser
 	cfg.Passwd = config.DBPass
