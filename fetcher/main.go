@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -20,12 +21,17 @@ import (
 var db *sql.DB
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatal("usage: cso-poller <config-path>")
+	var config Config
+	dev := os.Getenv("FETCHER_IS_DEV")
+	if dev != "" {
+		config = fetchConfig("./config.json")
+	} else {
+		if len(os.Args) < 2 {
+			log.Fatal("usage: cso-poller <config-path>")
+		}
+		config = fetchConfig(os.Args[1])
 	}
-	config := fetchConfig(os.Args[1])
-	//
-	//config := fetchConfig("./config.json")
+
 	cfg := mysql.NewConfig()
 	cfg.User = config.DBUser
 	cfg.Passwd = config.DBPass
@@ -44,6 +50,15 @@ func main() {
 		log.Fatal(pingErr)
 	}
 	fmt.Println("Connected!")
+
+	go func() {
+		updateBathingWater()
+		bwTicker := time.NewTicker(24 * time.Hour)
+		defer bwTicker.Stop()
+		for range bwTicker.C {
+			updateBathingWater()
+		}
+	}()
 
 	poll()
 	ticker := time.NewTicker(time.Duration(config.PollInterval) * time.Second) // Create a ticker that ticks every 2 seconds
@@ -436,6 +451,195 @@ func fetchPageScottishWater() (assets []Asset, err error) {
 	return returnres, nil
 }
 
+func updateBathingWater() {
+	start := time.Now()
+	log.Println("[POLL] Starting bathing water cycle")
+	bathingWaters, err := fetchBathingWaters()
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	err = upsertBathingWaters(bathingWaters)
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	err = updateNearestBathingWater()
+	if err != nil {
+		log.Println(err.Error())
+	}
+	log.Println("[POLL] Finished bathing water cycle in ", time.Since(start))
+}
+
+func fetchBathingWaters() ([]BathingWater, error) {
+	resp, err := http.Get("https://environment.data.gov.uk/doc/bathing-water.json?_pageSize=500&_view=bathing-water")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, errors.New(resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var result EABathingWaterResponse
+	err = json.Unmarshal(body, &result)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var returnres []BathingWater
+
+	for _, item := range result.Result.Items {
+		bw := item.ToBathingWater()
+		if bw.Lat == 0 || bw.Long == 0 {
+			continue
+		}
+		returnres = append(returnres, bw)
+	}
+
+	return returnres, nil
+}
+
+func upsertBathingWaters(bathingWaters []BathingWater) error {
+	chunkSize := 1000
+	for i := 0; i < len(bathingWaters); i += chunkSize {
+		end := i + chunkSize
+		if end > len(bathingWaters) {
+			end = len(bathingWaters)
+		}
+		chunk := bathingWaters[i:end]
+		err := upsertBathingWaterChunk(chunk)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func upsertBathingWaterChunk(bathingWaters []BathingWater) error {
+	placeholders := make([]string, len(bathingWaters))
+	for i := range bathingWaters {
+		placeholders[i] = "(?, ?, ?, ?, ?, ?)"
+	}
+	query := "INSERT INTO bathing_waters (id, name, latitude, longitude, classification, last_fetched) VALUES " + strings.Join(placeholders, ",") + " ON DUPLICATE KEY UPDATE name = VALUES(name), latitude = VALUES(latitude), longitude = VALUES(longitude), classification = VALUES(classification), last_fetched = VALUES(last_fetched)"
+	var args []interface{}
+
+	for _, bathingWater := range bathingWaters {
+		args = append(args, bathingWater.ID, bathingWater.Name, bathingWater.Lat, bathingWater.Long, bathingWater.Classification, time.Now().UTC())
+	}
+	_, err := db.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func updateNearestBathingWater() error {
+	rows, err := db.Query("SELECT asset_id, latitude, longitude FROM assets")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	assets := make(map[string]MinimalAsset)
+	for rows.Next() {
+		var assetID string
+		var Latitude float64
+		var Longitude float64
+		err = rows.Scan(&assetID, &Latitude, &Longitude)
+		if err != nil {
+			return err
+		}
+		assets[assetID] = MinimalAsset{
+			AssetID:   assetID,
+			Latitude:  Latitude,
+			Longitude: Longitude,
+		}
+	}
+	rows.Close()
+	rows, err = db.Query("SELECT id, name, latitude, longitude, classification FROM bathing_waters")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	bathingWaters := make([]BathingWater, 0)
+	for rows.Next() {
+		var BathingWaterID string
+		var BathingWaterName string
+		var Latitude float64
+		var Longitude float64
+		var Classification string
+		err = rows.Scan(&BathingWaterID, &BathingWaterName, &Latitude, &Longitude, &Classification)
+		if err != nil {
+			return err
+		}
+		bathingWaters = append(bathingWaters, BathingWater{
+			ID:             BathingWaterID,
+			Name:           BathingWaterName,
+			Lat:            Latitude,
+			Long:           Longitude,
+			Classification: Classification,
+		})
+	}
+
+	var results []NearestBathingWaterResult
+
+	for _, asset := range assets {
+		var nearest BathingWater
+		var nearestDist float64 = -1
+
+		for _, bw := range bathingWaters {
+			dist := haversine(asset.Latitude, asset.Longitude, bw.Lat, bw.Long)
+			if nearestDist == -1 || dist < nearestDist {
+				nearest = bw
+				nearestDist = dist
+			}
+		}
+
+		if nearestDist == -1 || nearestDist > 10000 {
+			continue
+		}
+
+		results = append(results, NearestBathingWaterResult{
+			AssetID:                    asset.AssetID,
+			BathingWaterID:             nearest.ID,
+			BathingWaterName:           nearest.Name,
+			BathingWaterClassification: nearest.Classification,
+			Distance:                   int(nearestDist),
+		})
+	}
+
+	for _, bw := range results {
+		_, err := db.Exec("UPDATE assets SET nearest_bw_id = ?, nearest_bw_name = ?, nearest_bw_classification = ?, nearest_bw_distance_m = ? WHERE asset_id = ?", bw.BathingWaterID, bw.BathingWaterName, bw.BathingWaterClassification, bw.Distance, bw.AssetID)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func haversine(lat1, lon1, lat2, lon2 float64) float64 {
+	const R = 6371000 // Earth radius in metres
+	lat1Rad := lat1 * math.Pi / 180
+	lat2Rad := lat2 * math.Pi / 180
+	deltaLat := (lat2 - lat1) * math.Pi / 180
+	deltaLon := (lon2 - lon1) * math.Pi / 180
+
+	a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
+		math.Cos(lat1Rad)*math.Cos(lat2Rad)*
+			math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
+
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+
+	return R * c
+}
+
 func (s SWWAsset) ToAsset() Asset {
 	return Asset{
 		AssetID:              s.AssetID,
@@ -475,9 +679,12 @@ func DWRStatusToStatus(dwrstatus string) int {
 		return 1
 	case "Overflow Not Operating (Has in the last 24 hours)":
 		return 0
+	default:
+		println("Unknown status: " + dwrstatus)
+		return -1
 	}
-	return -1
 }
+
 func ScottishWaterStatusToStatus(ScottishWaterStatus string) int {
 	switch ScottishWaterStatus {
 	case "13":
@@ -552,6 +759,16 @@ func (s ScottishWaterAsset) ToAsset() Asset {
 	}
 }
 
+func (item EABathingWaterItem) ToBathingWater() BathingWater {
+	return BathingWater{
+		ID:             item.ID,
+		Name:           item.Name.Value,
+		Lat:            item.SamplingPoint.Lat,
+		Long:           item.SamplingPoint.Long,
+		Classification: item.LatestComplianceAssessment.ComplianceClassification.Name.Value,
+	}
+}
+
 type ScottishWaterResponse struct {
 	Results []ScottishWaterAsset `json:"results"`
 }
@@ -586,6 +803,12 @@ type Asset struct {
 	ReceivingWaterCourse string  `json:"ReceivingWaterCourse"`
 	LastUpdated          int64   `json:"LastUpdated"`
 }
+type MinimalAsset struct {
+	AssetID   string
+	Longitude float64
+	Latitude  float64
+}
+
 type SWWArcGISResponse struct {
 	Features      []SWWFeatures `json:"features"`
 	ExceededLimit bool          `json:"exceededTransferLimit"`
@@ -635,11 +858,51 @@ type LatestState struct {
 	LatestEventEnd   *time.Time
 	PolledAt         time.Time
 }
+type EABathingWaterResponse struct {
+	Result struct {
+		Items []EABathingWaterItem `json:"items"`
+	} `json:"result"`
+}
+
+type EABathingWaterItem struct {
+	ID   string `json:"eubwidNotation"`
+	Name struct {
+		Value string `json:"_value"`
+	} `json:"name"`
+	SamplingPoint struct {
+		Lat  float64 `json:"lat"`
+		Long float64 `json:"long"`
+	} `json:"samplingPoint"`
+	LatestComplianceAssessment struct {
+		ComplianceClassification struct {
+			Name struct {
+				Value string `json:"_value"`
+			} `json:"name"`
+		} `json:"complianceClassification"`
+	} `json:"latestComplianceAssessment"`
+}
+
+type BathingWater struct {
+	ID             string `json:"eubwidNotation"`
+	Name           string `json:"name"`
+	Lat            float64
+	Long           float64
+	Classification string
+}
+
+type NearestBathingWaterResult struct {
+	AssetID                    string
+	BathingWaterID             string
+	BathingWaterName           string
+	BathingWaterClassification string
+	Distance                   int
+}
 
 type Config struct {
-	DBHost       string `json:"db_host"`
-	DBUser       string `json:"db_user"`
-	DBPass       string `json:"db_pass"`
-	DBName       string `json:"db_name"`
-	PollInterval int    `json:"poll_interval"`
+	DBHost                     string `json:"db_host"`
+	DBUser                     string `json:"db_user"`
+	DBPass                     string `json:"db_pass"`
+	DBName                     string `json:"db_name"`
+	PollInterval               int    `json:"poll_interval"`
+	BathingWaterUpdateInterval int    `json:"bathing_water_update_interval"`
 }
