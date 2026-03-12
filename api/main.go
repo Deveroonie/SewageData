@@ -64,7 +64,8 @@ func getAssets(c *gin.Context) {
     SELECT a.asset_id,
         a.latitude,
         a.longitude,
-        l.status
+        l.status,
+        l.latest_event_end
     FROM assets a
     INNER JOIN latest_state l ON l.asset_id = a.asset_id
 `)
@@ -80,8 +81,9 @@ func getAssets(c *gin.Context) {
 		var latitude float64
 		var longitude float64
 		var status int
+		var latestEventEnd *time.Time
 
-		err := rows.Scan(&assetId, &latitude, &longitude, &status)
+		err := rows.Scan(&assetId, &latitude, &longitude, &status, &latestEventEnd)
 		if err != nil {
 			return
 		}
@@ -91,6 +93,7 @@ func getAssets(c *gin.Context) {
 			latitude,
 			longitude,
 			status,
+			latestEventEnd,
 		}
 
 		response.Assets = append(response.Assets, asset)
@@ -110,7 +113,11 @@ func getAsset(c *gin.Context) {
         l.status,
         l.latest_event_start,
         l.latest_event_end,
-        l.polled_at
+        l.polled_at,
+        a.nearest_bw_id,
+        a.nearest_bw_name,
+        a.nearest_bw_classification,
+        a.nearest_bw_distance_m
     FROM assets a
     INNER JOIN latest_state l ON l.asset_id = a.asset_id
     WHERE a.asset_id = ?
@@ -132,8 +139,12 @@ func getAsset(c *gin.Context) {
 		var latestEventStart *time.Time
 		var latestEventEnd *time.Time
 		var polledAt time.Time
+		var nearestBathingWaterID *string
+		var nearestBathingWaterName *string
+		var nearestBathingWaterClassification *string
+		var nearestBathingDistance *int
 
-		err := rows.Scan(&assetId, &company, &receivingWaterCourse, &latitude, &longitude, &status, &latestEventStart, &latestEventEnd, &polledAt)
+		err := rows.Scan(&assetId, &company, &receivingWaterCourse, &latitude, &longitude, &status, &latestEventStart, &latestEventEnd, &polledAt, &nearestBathingWaterID, &nearestBathingWaterName, &nearestBathingWaterClassification, &nearestBathingDistance)
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
@@ -149,6 +160,10 @@ func getAsset(c *gin.Context) {
 			latestEventStart,
 			latestEventEnd,
 			polledAt,
+			nearestBathingWaterName,
+			nearestBathingWaterID,
+			nearestBathingWaterClassification,
+			nearestBathingDistance,
 		}
 
 		c.JSON(200, response)
@@ -279,21 +294,26 @@ type AssetResponse struct {
 }
 
 type MinimalAsset struct {
-	AssetId   string  `json:"asset_id"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-	Status    int     `json:"status"`
+	AssetId        string     `json:"asset_id"`
+	Latitude       float64    `json:"latitude"`
+	Longitude      float64    `json:"longitude"`
+	Status         int        `json:"status"`
+	LatestEventEnd *time.Time `json:"latest_event_end"`
 }
 type Asset struct {
-	ID                   string     `json:"asset_id"`
-	Company              string     `json:"company"`
-	ReceivingWatercourse string     `json:"receiving_watercourse"`
-	Latitude             float64    `json:"latitude"`
-	Longitude            float64    `json:"longitude"`
-	Status               int        `json:"status"`
-	LatestEventStart     *time.Time `json:"latest_event_start"`
-	LatestEventEnd       *time.Time `json:"latest_event_end"`
-	PolledAt             time.Time  `json:"polled_at"`
+	ID                                string     `json:"asset_id"`
+	Company                           string     `json:"company"`
+	ReceivingWatercourse              string     `json:"receiving_watercourse"`
+	Latitude                          float64    `json:"latitude"`
+	Longitude                         float64    `json:"longitude"`
+	Status                            int        `json:"status"`
+	LatestEventStart                  *time.Time `json:"latest_event_start"`
+	LatestEventEnd                    *time.Time `json:"latest_event_end"`
+	PolledAt                          time.Time  `json:"polled_at"`
+	NearestBathingWaterName           *string    `json:"nearest_bathing_water_name"`
+	NearestBathingWaterID             *string    `json:"nearest_bathing_water_id"`
+	NearestBathingWaterClassification *string    `json:"nearest_bathing_water_classification"`
+	NearestBathingWaterDistance       *int       `json:"nearest_bathing_water_distance"`
 }
 
 type Stats struct {
