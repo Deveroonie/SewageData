@@ -1,8 +1,14 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
 
 html, body, #root {
-  height: 100%;
-  margin: 0;
+	height: 100%;
+	margin: 0;
+	font-family: 'Roboto', sans-serif;
+}
+
+.monserrat {
+	font-family: 'Montserrat', sans-serif;
 }
 
 @theme {
