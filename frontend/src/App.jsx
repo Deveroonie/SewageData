@@ -3,6 +3,8 @@ import Map, { Source, Layer, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import { faXmark } from '@fortawesome/free-solid-svg-icons';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 const base = "https://api.sewagedata.co.uk"
 
 
@@ -116,17 +118,17 @@ function App() {
       <>
       <div className='flex flex-col h-screen'>
           <div className='shrink-0 bg-brown text-white px-8 py-4 text-center'>
-            <span className='text-3xl font-bold'>Sewage Data - Map</span>
-            <p className='text-lg'>A live map showing sewage discharges from all water companies across England, Wales* and Scotland.</p>
-            <span className='text-gray-300 italic text-sm'>*excludes Hafren Dyfrdwy<br />Tracking for events began on 01/03/2026. Events before this date will not be displayed.</span><br />
-            <p className='text-lg font-semibold'>
+            <span className='lg:text-3xl text-xl font-bold'>Sewage Data - Map</span>
+            <p className='lg:text-lg text-sm'>A live map showing sewage discharges from all water companies across England, Wales* and Scotland.</p>
+            <span className='text-gray-300 italic lg:text-sm text-xs'>*excludes Hafren Dyfrdwy<br />Tracking for events began on 01/03/2026. Events before this date will not be displayed.</span><br />
+            <p className='lg:text-lg font-semibold'>
               <span className='p-2 rounded-lg font-bold bg-brown-800'>{stats.total_discharging}</span> CSOs discharging right now.
             </p>
           </div>
             <div className="flex flex-row flex-1 min-h-0">
               {selectedAsset && assetData && (
-                <div className="bg-brown-700 border-2 border-white p-4 text-white flex flex-col overflow-hidden self-stretch">
-                  <h2 className="monserrat text-xl font-bold">{assetData.company}</h2>
+                <div className="bg-brown-700 border-2 border-white p-4 text-white flex flex-col overflow-hidden self-stretch  max-md:w-full">
+                  <h2 className="monserrat text-xl font-bold"><span className="text-xl cursor-pointer" onClick={() => {fetchAsset(null)}}><FontAwesomeIcon icon={faXmark} /></span> {assetData.company}</h2>
                   <span className="text-sm font-semibold monserrat">{assetData.asset_id}</span>
                   <p className=""><span className="font-semibold">Discharges Into:</span>&nbsp;{assetData.receiving_watercourse}</p>
                   <div className={`
@@ -230,9 +232,41 @@ function App() {
             </div>
 
       </div>
-      {/* Refactor */}
-      <h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Overflows by Company</h2>
-      <div className='flex flex-col items-center px-4 pb-8'>
+      {/* Overflows by Company */}
+<h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Overflows by Company</h2>
+
+{/* Mobile cards */}
+<div className='sm:hidden px-4 pb-8 space-y-3'>
+  {stats.companies.map((company, i) => (
+    <div key={i} className='border border-gray-200 rounded-lg p-3 bg-white'>
+      <p className='font-semibold text-sm mb-2'>{company.company}</p>
+      <div className='grid grid-cols-2 gap-1 text-sm'>
+        <span className='text-gray-500'>Total CSOs</span><span className='text-right tabular-nums'>{company.total_assets}</span>
+        <span className='text-gray-500'>Active</span><span className='text-right tabular-nums' style={{color: company.total_discharging > 0 ? 'red' : 'inherit', fontWeight: company.total_discharging > 0 ? '600' : 'normal'}}>{company.total_discharging}</span>
+        <span className='text-gray-500'>Active %</span><span className='text-right tabular-nums'>{company.percent_active}%</span>
+        <span className='text-gray-500'>Offline</span><span className='text-right tabular-nums text-gray-500'>{company.company === "Dwr Cymru Welsh Water" ? "-" : company.total_offline}</span>
+      </div>
+    </div>
+  ))}
+  {(() => {
+    const totalAssets = stats.companies.reduce((s, c) => s + c.total_assets, 0)
+    const totalDischarging = stats.companies.reduce((s, c) => s + c.total_discharging, 0)
+    const totalOffline = stats.companies.reduce((s, c) => s + c.total_offline, 0)
+    const pct = totalAssets > 0 ? ((totalDischarging / totalAssets) * 100).toFixed(1) : '0.0'
+    return (
+      <div className='border-2 border-gray-400 rounded-lg p-3 bg-gray-100 font-semibold'>
+        <p className='text-sm mb-2'>Total</p>
+        <div className='grid grid-cols-2 gap-1 text-sm'>
+          <span className='text-gray-500'>Total CSOs</span><span className='text-right tabular-nums'>{totalAssets}</span>
+          <span className='text-gray-500'>Active</span><span className='text-right tabular-nums' style={{color: totalDischarging > 0 ? 'red' : 'inherit', fontWeight: totalDischarging > 0 ? '600' : 'normal'}}>{totalDischarging}</span>
+          <span className='text-gray-500'>Active %</span><span className='text-right tabular-nums'>{pct}%</span>
+          <span className='text-gray-500'>Offline</span><span className='text-right tabular-nums text-gray-500'>{totalOffline - (stats.companies.find(c => c.company === "Dwr Cymru Welsh Water")?.total_offline || 0)}</span>
+        </div>
+      </div>
+    )
+  })()}
+</div>
+      <div className='hidden sm:flex flex-col items-center px-4 pb-8'>
         <table className='w-full max-w-4xl text-sm border-collapse'>
           <thead>
             <tr className='bg-gray-100 text-gray-700 uppercase text-xs tracking-wide'>
@@ -254,7 +288,7 @@ function App() {
                   </span>
                 </td>
                 <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{company.percent_active}%</td>
-                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums text-gray-500'>{company.company == "Dwr Cymru Welsh Water" ? "Data Unreliable." : company.total_offline}</td>
+                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums text-gray-500'>{company.company == "Dwr Cymru Welsh Water" ? "-" : company.total_offline}</td>
               </tr>
             ))}
             {(() => {
@@ -279,16 +313,32 @@ function App() {
           </tbody>
         </table>
       </div>
-      <h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Top Active CSOs</h2>
-      <div className='flex flex-col items-center px-4 pb-8'>
+      {/* Top Active CSOs */}
+<h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Top Active CSOs</h2>
+
+{/* Mobile cards */}
+<div className='sm:hidden px-4 pb-8 space-y-3'>
+  {topDischarges.map((discharge, i) => (
+    <div key={i} className='border border-gray-200 rounded-lg p-3 bg-white'>
+      <p className='font-semibold text-sm mb-1'>{discharge.company}</p>
+      <p className='text-sm text-gray-600 mb-2'>{discharge.receiving_watercourse}</p>
+      <div className='grid grid-cols-2 gap-1 text-sm'>
+        <span className='text-gray-500'>Started</span><span className='text-right tabular-nums'>{new Date(discharge.discharge_start).toLocaleDateString()}</span>
+        <span className='text-gray-500'>Duration</span><span className='text-right tabular-nums'>{(minutesAgo(new Date(discharge.discharge_start))/1440).toFixed(2)} days</span>
+      </div>
+    </div>
+  ))}
+</div>
+
+      <div className='hidden sm:flex flex-col items-center px-4 pb-8'>
         <table className='w-full max-w-4xl text-sm border-collapse'>
           <thead>
             <tr className='bg-gray-100 text-gray-700 uppercase text-xs tracking-wide'>
-              <th className='text-left px-4 py-2 border border-gray-200'>Company</th>
-              <th className='text-right px-4 py-2 border border-gray-200'>Receiving Watercourse</th>
-              <th className='text-right px-4 py-2 border border-gray-200'>Discharge Started</th>
-              <th className='text-right px-4 py-2 border border-gray-200'>Duration (Hours)</th>
-              <th className='text-right px-4 py-2 border border-gray-200'>Duration (Days)</th>
+              <th className='text-left lg:px-4 py-2 border border-gray-200'>Company</th>
+              <th className='text-right lg:px-4 py-2 border border-gray-200'>Receiving Watercourse</th>
+              <th className='text-right lg:px-4 py-2 border border-gray-200'>Discharge Started</th>
+              <th className='text-right lg:px-4 py-2 border border-gray-200 hidden sm:table-cell'>Duration (Hours)</th>
+              <th className='text-right lg:px-4 py-2 border border-gray-200'>Duration (Days)</th>
             </tr>
           </thead>
           <tbody>
@@ -297,7 +347,7 @@ function App() {
                 <td className='px-4 py-2 border border-gray-200 font-medium'>{discharge.company}</td>
                 <td className='px-4 py-2 border border-gray-200 font-medium'>{discharge.receiving_watercourse}</td>
                 <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{new Date(discharge.discharge_start).toLocaleDateString()}</td>
-                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{(minutesAgo(new Date(discharge.discharge_start))/60).toFixed(2)}</td>
+                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums hidden sm:table-cell'>{(minutesAgo(new Date(discharge.discharge_start))/60).toFixed(2)}</td>
                 <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{(minutesAgo(new Date(discharge.discharge_start))/1440).toFixed(2)}</td>
               </tr>
             ))}
@@ -327,9 +377,9 @@ function App() {
             <span className='text-sm'>Contains Environment Agency information © Environment Agency and database right. Licensed under <a href='https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/'>Open Government Licence (OGL) v3</a></span>
             <span className='text-lg'><br />Map Data provided by:<br /></span>
             <span className='text-sm'>
-              <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>,&nbsp;
-              <a href='https://openmaptiles.org/'>OpenMapTiles</a>,&nbsp;
-              <a href='https://maplibre.org/'>MapLibre</a>,&nbsp;
+              <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>, 
+              <a href='https://openmaptiles.org/'>OpenMapTiles</a>, 
+              <a href='https://maplibre.org/'>MapLibre</a>, 
               <a href='https://openfreemap.org/'>OpenFreeMap</a>
             </span>
           </div>
