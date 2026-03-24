@@ -7,7 +7,7 @@ import * as Sentry from "@sentry/react";
 
 Sentry.init({
   dsn: "https://8a1d5a8f5df1a1e7f823ae60f1280467@o4505861703729152.ingest.us.sentry.io/4511101740187648",
-  sendDefaultPii: true,
+  sendDefaultPii: false,
   integrations: [
     Sentry.replayIntegration()
   ],
