@@ -1,4 +1,4 @@
-// import { useState } from 'react'
+/* global umami */
 import Map, { Source, Layer, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useState } from 'react';
@@ -32,7 +32,10 @@ function App() {
         data.events = assetDataEvents
         data.hasRecentlyDischarged = (status == 2)
         setAssetData(data)
-        console.log(data)
+        umami.track('cso_viewed', {
+          cso: assetId,
+          direct: !!new URLSearchParams(window.location.search).get('asset'),
+        });
     }
 
     function hoursActive(date) {
