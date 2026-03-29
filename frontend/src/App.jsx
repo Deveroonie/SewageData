@@ -1,10 +1,15 @@
 /* global umami */
 import Map, { Source, Layer, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { faXmark } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import MobileCompanies from './components/homepage-stats/MobileCompanies';
+import DesktopCompanies from './components/homepage-stats/DesktopCompanies';
+import MobileCSOs from './components/homepage-stats/MobileCSOs';
+import DesktopCSOs from './components/homepage-stats/DesktopCSOs';
+import minutesAgo from './util/minutesAgo';
 const base = "https://api.sewagedata.co.uk"
 
 
@@ -16,6 +21,7 @@ function App() {
     const [selectedAsset, setSelectedAsset] = useState(null)
     const [assetData, setAssetData] = useState(null)
     const [isDefault, setIsDefault] = useState(null)
+    const mapRef = useRef(null)
 
     async function fetchAsset(assetId, status) {
         if (!assetId || assetId == undefined || assetId == null) {
@@ -66,8 +72,11 @@ function App() {
             const assetData = (await axios.get(base+"/api/assets")).data.assets
             const dischargesData = (await axios.get(base+"/api/top-discharges")).data.discharges
             setStats(data)
+            console.log("stats set", data)
             setAssets(assetData)
+            console.log("assets set", assetData)
             setTopDischarges(dischargesData)
+            console.log("topDischarges set", dischargesData)
         }
         fetchData()
 
@@ -82,6 +91,12 @@ function App() {
                 const status = (asset.status != 0 ? asset.status : minutesAgo(new Date(asset.latest_event_end)) < 2880 ? 2 : 0)
                 await fetchAsset(assetEntryID, status)
                 setIsDefault(true)
+                if (mapRef.current) {
+                  mapRef.current.flyTo({ 
+                    center: [asset.longitude, asset.latitude], 
+                    zoom: 13 
+                  })
+                }
             } catch(err) {
               console.log(err)
             }
@@ -90,21 +105,22 @@ function App() {
 
         checkURLEntry()
     }, [])
-    
-    const initialView = assetData && isDefault
-  ? { longitude: assetData.longitude, latitude: assetData.latitude, zoom: 13 }
-  : { longitude: -2.5, latitude: 54.5, zoom: 5 }
 
-    if(!stats || !assets) return <div>Loading...</div>
-
-    const geojson = {
-        type: 'FeatureCollection',
-        features: assets.map(asset => ({
+const geojson = {
+    type: 'FeatureCollection',
+    features: (assets ?? []).map(asset => {
+        const effectiveStatus = asset.status !== 0 
+            ? asset.status 
+            : minutesAgo(new Date(asset.latest_event_end)) < 2880 
+                ? 2 
+                : 0
+        return {
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [asset.longitude, asset.latitude] },
-            properties: { status: (asset.status != 0 ? asset.status : minutesAgo(new Date(asset.latest_event_end)) < 2880 ? 2 : 0), name: asset.name, asset_id: asset.asset_id }
-        }))
-    }
+            properties: { status: effectiveStatus, name: asset.name, asset_id: asset.asset_id }
+        }
+    })
+}
 
     const baseCircleStyle = {
       type: 'circle',
@@ -118,7 +134,7 @@ function App() {
     const notDischargingLayer = { ...baseCircleStyle, id: 'assets-notdischarging',  filter: ['==', ['get', 'status'], 0],  paint: { ...baseCircleStyle.paint, 'circle-color': 'green'  } }
     const recentDischargeLayer = { ...baseCircleStyle, id: 'assets-recentdischarge', filter: ['==', ['get', 'status'], 2],  paint: { ...baseCircleStyle.paint, 'circle-color': 'yellow' } }
     const dischargingLayer   = { ...baseCircleStyle, id: 'assets-discharging',    filter: ['==', ['get', 'status'], 1],  paint: { ...baseCircleStyle.paint, 'circle-color': 'red'    } }
-
+    console.log("rendering", stats, topDischarges)
     return (
       <>
       <div className='flex flex-col h-screen'>
@@ -127,7 +143,7 @@ function App() {
             <p className='lg:text-lg text-sm'>A live map showing sewage discharges from all water companies across England, Wales* and Scotland.</p>
             <span className='text-gray-300 italic lg:text-sm text-xs'>*excludes Hafren Dyfrdwy<br />Tracking for events began on 01/03/2026. Events before this date will not be displayed.</span><br />
             <p className='lg:text-lg font-semibold'>
-              <span className='p-2 rounded-lg font-bold bg-brown-800'>{stats.total_discharging}</span> CSOs discharging right now.
+              <span className='p-2 rounded-lg font-bold bg-brown-800'>{stats?.total_discharging || "..."}</span> CSOs discharging right now.
             </p>
           </div>
             <div className="flex flex-row flex-1 min-h-0">
@@ -207,8 +223,10 @@ function App() {
               )}
               <div className="grow min-h-0">
                 <Map
-                  initialViewState={initialView}
+                  ref={mapRef}
+                  initialViewState={{ longitude: -2.5, latitude: 54.5, zoom: 5 }}
                   style={{ width: '100%', height: '100%' }}
+                  minZoom={4}
                   mapStyle="https://tiles.openfreemap.org/styles/liberty"
                   onClick={async e => {
                     const feature = e.features?.[0]
@@ -244,127 +262,33 @@ function App() {
 
       </div>
       {/* Overflows by Company */}
-<h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Overflows by Company</h2>
+      <h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Overflows by Company</h2>
 
-{/* Mobile cards */}
-<div className='sm:hidden px-4 pb-8 space-y-3'>
-  {stats.companies.map((company, i) => (
-    <div key={i} className='border border-gray-200 rounded-lg p-3 bg-white'>
-      <p className='font-semibold text-sm mb-2'>{company.company}</p>
-      <div className='grid grid-cols-2 gap-1 text-sm'>
-        <span className='text-gray-500'>Total CSOs</span><span className='text-right tabular-nums'>{company.total_assets}</span>
-        <span className='text-gray-500'>Active</span><span className='text-right tabular-nums' style={{color: company.total_discharging > 0 ? 'red' : 'inherit', fontWeight: company.total_discharging > 0 ? '600' : 'normal'}}>{company.total_discharging}</span>
-        <span className='text-gray-500'>Active %</span><span className='text-right tabular-nums'>{company.percent_active}%</span>
-        <span className='text-gray-500'>Offline</span><span className='text-right tabular-nums text-gray-500'>{company.company === "Dwr Cymru Welsh Water" ? "-" : company.total_offline}</span>
-      </div>
-    </div>
-  ))}
-  {(() => {
-    const totalAssets = stats.companies.reduce((s, c) => s + c.total_assets, 0)
-    const totalDischarging = stats.companies.reduce((s, c) => s + c.total_discharging, 0)
-    const totalOffline = stats.companies.reduce((s, c) => s + c.total_offline, 0)
-    const pct = totalAssets > 0 ? ((totalDischarging / totalAssets) * 100).toFixed(1) : '0.0'
-    return (
-      <div className='border-2 border-gray-400 rounded-lg p-3 bg-gray-100 font-semibold'>
-        <p className='text-sm mb-2'>Total</p>
-        <div className='grid grid-cols-2 gap-1 text-sm'>
-          <span className='text-gray-500'>Total CSOs</span><span className='text-right tabular-nums'>{totalAssets}</span>
-          <span className='text-gray-500'>Active</span><span className='text-right tabular-nums' style={{color: totalDischarging > 0 ? 'red' : 'inherit', fontWeight: totalDischarging > 0 ? '600' : 'normal'}}>{totalDischarging}</span>
-          <span className='text-gray-500'>Active %</span><span className='text-right tabular-nums'>{pct}%</span>
-          <span className='text-gray-500'>Offline</span><span className='text-right tabular-nums text-gray-500'>{totalOffline - (stats.companies.find(c => c.company === "Dwr Cymru Welsh Water")?.total_offline || 0)}</span>
-        </div>
-      </div>
-    )
-  })()}
-</div>
-      <div className='hidden sm:flex flex-col items-center px-4 pb-8'>
-        <table className='w-full max-w-4xl text-sm border-collapse'>
-          <thead>
-            <tr className='bg-gray-100 text-gray-700 uppercase text-xs tracking-wide'>
-              <th className='text-left px-4 py-2 border border-gray-200'>Company</th>
-              <th className='text-right px-4 py-2 border border-gray-200'>Total CSOs</th>
-              <th className='text-right px-4 py-2 border border-gray-200'>Active</th>
-              <th className='text-right px-4 py-2 border border-gray-200'>Active %</th>
-              <th className='text-right px-4 py-2 border border-gray-200'>Offline</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stats.companies.map((company, i) => (
-              <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                <td className='px-4 py-2 border border-gray-200 font-medium'>{company.company}</td>
-                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{company.total_assets}</td>
-                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>
-                  <span style={{ color: company.total_discharging > 0 ? 'red' : 'inherit', fontWeight: company.total_discharging > 0 ? '600' : 'normal' }}>
-                    {company.total_discharging}
-                  </span>
-                </td>
-                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{company.percent_active}%</td>
-                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums text-gray-500'>{company.company == "Dwr Cymru Welsh Water" ? "-" : company.total_offline}</td>
-              </tr>
-            ))}
-            {(() => {
-              const totalAssets = stats.companies.reduce((s, c) => s + c.total_assets, 0)
-              const totalDischarging = stats.companies.reduce((s, c) => s + c.total_discharging, 0)
-              const totalOffline = stats.companies.reduce((s, c) => s + c.total_offline, 0)
-              const pct = totalAssets > 0 ? ((totalDischarging / totalAssets) * 100).toFixed(1) : '0.0'
-                return (
-                <tr className='bg-gray-100 font-semibold border-t-2 border-gray-400'>
-                  <td className='px-4 py-2 border border-gray-200'>Total</td>
-                  <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{totalAssets}</td>
-                  <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>
-                  <span style={{ color: totalDischarging > 0 ? 'red' : 'inherit', fontWeight: totalDischarging > 0 ? '600' : 'normal' }}>
-                    {totalDischarging}
-                  </span>
-                  </td>
-                  <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{pct}%</td>
-                  <td className='px-4 py-2 border border-gray-200 text-right tabular-nums text-gray-500'>{totalOffline - (stats.companies.find(c => c.company === "Dwr Cymru Welsh Water")?.total_offline || 0)}</td>
-                </tr>
-                )
-            })()}
-          </tbody>
-        </table>
-      </div>
+      {stats && (
+        <>
+          <div className='sm:hidden px-4 pb-8 space-y-3'>
+            <MobileCompanies stats={stats} />
+          </div>
+          <div className='hidden sm:flex flex-col items-center px-4 pb-8'>
+              <DesktopCompanies stats={stats} />
+          </div>
+        </>
+      )}
+
       {/* Top Active CSOs */}
-<h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Top Active CSOs</h2>
+      <h2 className='text-center text-2xl font-semibold mt-6 mb-4'>Top Active CSOs</h2>
 
-{/* Mobile cards */}
-<div className='sm:hidden px-4 pb-8 space-y-3'>
-  {topDischarges.map((discharge, i) => (
-    <div key={i} className='border border-gray-200 rounded-lg p-3 bg-white'>
-      <p className='font-semibold text-sm mb-1'>{discharge.company}</p>
-      <p className='text-sm text-gray-600 mb-2'>{discharge.receiving_watercourse}</p>
-      <div className='grid grid-cols-2 gap-1 text-sm'>
-        <span className='text-gray-500'>Started</span><span className='text-right tabular-nums'>{new Date(discharge.discharge_start).toLocaleDateString()}</span>
-        <span className='text-gray-500'>Duration</span><span className='text-right tabular-nums'>{(minutesAgo(new Date(discharge.discharge_start))/1440).toFixed(2)} days</span>
-      </div>
-    </div>
-  ))}
-</div>
+      {topDischarges && (
+        <>
+          <div className='sm:hidden px-4 pb-8 space-y-3'>
+            <MobileCSOs topDischarges={topDischarges} />
+          </div>
+          <div className='hidden sm:flex flex-col items-center px-4 pb-8'>
+            <DesktopCSOs topDischarges={topDischarges} />
+          </div>
+        </>
+      )}
 
-      <div className='hidden sm:flex flex-col items-center px-4 pb-8'>
-        <table className='w-full max-w-4xl text-sm border-collapse'>
-          <thead>
-            <tr className='bg-gray-100 text-gray-700 uppercase text-xs tracking-wide'>
-              <th className='text-left lg:px-4 py-2 border border-gray-200'>Company</th>
-              <th className='text-right lg:px-4 py-2 border border-gray-200'>Receiving Watercourse</th>
-              <th className='text-right lg:px-4 py-2 border border-gray-200'>Discharge Started</th>
-              <th className='text-right lg:px-4 py-2 border border-gray-200 hidden sm:table-cell'>Duration (Hours)</th>
-              <th className='text-right lg:px-4 py-2 border border-gray-200'>Duration (Days)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {topDischarges.map((discharge, i) => (
-              <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                <td className='px-4 py-2 border border-gray-200 font-medium'>{discharge.company}</td>
-                <td className='px-4 py-2 border border-gray-200 font-medium'>{discharge.receiving_watercourse}</td>
-                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{new Date(discharge.discharge_start).toLocaleDateString()}</td>
-                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums hidden sm:table-cell'>{(minutesAgo(new Date(discharge.discharge_start))/60).toFixed(2)}</td>
-                <td className='px-4 py-2 border border-gray-200 text-right tabular-nums'>{(minutesAgo(new Date(discharge.discharge_start))/1440).toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
             <div className='shrink-0 bg-brown text-white px-16 py-8 text-center'>
             <span className='text-3xl font-bold'>Sewage Data</span>
             <p className='text-xl font-semibold'>&copy; 2026 <a href='https://deveroonie.co.uk'>Deveroonie</a>. Licensed under MIT.</p>
@@ -396,12 +320,6 @@ function App() {
           </div>
       </>
     )
-}
-
-function minutesAgo(date) {
-  const now = new Date();
-  const diffMs = now - new Date(date);
-  return Math.floor(diffMs / 1000 / 60);
 }
 
 export default App
