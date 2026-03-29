@@ -133,7 +133,10 @@ function App() {
             <div className="flex flex-row flex-1 min-h-0">
               {selectedAsset && assetData && (
                 <div className="bg-brown-700 border-2 border-white p-4 text-white flex flex-col overflow-hidden self-stretch  max-md:w-full">
-                  <h2 className="monserrat text-xl font-bold"><span className="text-xl cursor-pointer" onClick={() => {fetchAsset(null)}}><FontAwesomeIcon icon={faXmark} /></span> {assetData.company}</h2>
+                  <div className='flex flex-row justify-between'>
+                    <h2 className="monserrat text-xl font-bold">{assetData.company}</h2>
+                    <span className="text-xl cursor-pointer" onClick={() => {fetchAsset(null)}}><FontAwesomeIcon icon={faXmark} /></span> 
+                  </div>
                   <span className="text-sm font-semibold monserrat">{assetData.asset_id}</span>
                   <p className=""><span className="font-semibold">Discharges Into:</span>&nbsp;{assetData.receiving_watercourse}</p>
                   <div className={`
