@@ -106,16 +106,18 @@ function App() {
         }))
     }
 
-    const circleLayer = {
-        id: 'assets',
-        type: 'circle',
-        paint: {
-            'circle-radius': 6,
-            'circle-color': ['match', ['get', 'status'], 0, 'green', 1, 'red', 2, 'yellow', 'gray'],
-            'circle-opacity': 0.85
-            //'circle-sort-key': ['match', ['get', 'status'], 0, 0, 1, 2, 1],
-        }
+    const baseCircleStyle = {
+      type: 'circle',
+      paint: {
+          'circle-radius': 6,
+          'circle-opacity': 0.85
+      }
     }
+
+    const grayLayer  = { ...baseCircleStyle, id: 'assets-gray',   filter: ['==', ['get', 'status'], -1], paint: { ...baseCircleStyle.paint, 'circle-color': 'gray'   } }
+    const greenLayer = { ...baseCircleStyle, id: 'assets-green',  filter: ['==', ['get', 'status'], 0],  paint: { ...baseCircleStyle.paint, 'circle-color': 'green'  } }
+    const yellowLayer= { ...baseCircleStyle, id: 'assets-yellow', filter: ['==', ['get', 'status'], 2],  paint: { ...baseCircleStyle.paint, 'circle-color': 'yellow' } }
+    const redLayer   = { ...baseCircleStyle, id: 'assets-red',    filter: ['==', ['get', 'status'], 1],  paint: { ...baseCircleStyle.paint, 'circle-color': 'red'    } }
 
     return (
       <>
@@ -217,7 +219,10 @@ function App() {
                   cursor={selectedAsset ? 'pointer' : 'auto'}
                 >
                   <Source id="assets" type="geojson" data={geojson}>
-                    <Layer {...circleLayer} />
+                    <Layer {...greenLayer} />
+                    <Layer {...grayLayer} />
+                    <Layer {...yellowLayer} />
+                    <Layer {...redLayer} />
                   </Source>
                   {/*{selectedAsset && (
                     <Popup
