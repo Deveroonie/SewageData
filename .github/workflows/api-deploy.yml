@@ -19,7 +19,7 @@ jobs:
           go-version: '1.26'
 
       - name: Build binary
-        run: go build -o sewagedata-api ./api/
+        run: cd api && go build -o ../sewagedata-api
 
       - name: Copy binary to server
         uses: appleboy/scp-action@v0.1.7
