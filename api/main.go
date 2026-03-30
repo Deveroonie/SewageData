@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
@@ -25,7 +27,7 @@ func main() {
 		config = fetchConfig("./config.json")
 	} else {
 		if len(os.Args) < 2 {
-			log.Fatal("usage: cso-poller <config-path>")
+			log.Fatal("usage: cso-api <config-path>")
 		}
 		config = fetchConfig(os.Args[1])
 	}
@@ -49,7 +51,14 @@ func main() {
 	}
 	fmt.Println("Connected!")
 
+	if err := sentry.Init(sentry.ClientOptions{
+		Dsn: config.DSN,
+	}); err != nil {
+		fmt.Printf("Sentry initialization failed: %v\n", err)
+	}
+
 	r := gin.Default()
+	r.Use(sentrygin.New(sentrygin.Options{}))
 	r.Use(cors.Default())
 	r.Use(gzip.Gzip(gzip.DefaultCompression))
 
@@ -390,4 +399,5 @@ type Config struct {
 	DBUser string `json:"db_user"`
 	DBPass string `json:"db_pass"`
 	DBName string `json:"db_name"`
+	DSN    string `json:"dsn"`
 }
