@@ -1,0 +1,46 @@
+name: Deploy API
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'fetcher/**'
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build binary
+        run: cd fetcher && go build -o ../sewagedata-poller
+
+      - name: Copy binary to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "sewagedata-poller"
+          target: "/etc/sewagedata-poller/tmp/"
+
+      - name: Restart systemd service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            mv /etc/sewagedata-api/tmp/sewagedata-poller /etc/sewagedata-poller/sewagedata-poller.new
+            chmod +x /etc/sewagedata-poller/sewagedata-poller.new
+            mv /etc/sewagedata-poller/sewagedata-poller.new /etc/sewagedata-poller/sewagedata-poller
+            systemctl restart cso-poller
+            systemctl is-active --quiet cso-poller && echo "Service is running" || echo "Service FAILED to start"
