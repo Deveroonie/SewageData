@@ -1,0 +1,23 @@
+{
+  "name": "bsky-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@atproto/api": "^0.19.8",
+    "cron": "^4.4.0",
+    "dotenv": "^17.4.1",
+    "masto": "^7.10.2",
+    "mysql": "^2.18.1",
+    "mysql2": "^3.22.1",
+    "redis": "^5.12.1",
+    "twitter-api-v2": "^1.29.0"
+  }
+}
