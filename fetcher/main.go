@@ -839,7 +839,7 @@ type DWRFeatures struct {
 	Coordinates DWRCoords `json:"geometry"`
 }
 type DWRAsset struct { // absolute wankers
-	AssetID              string  `json:"GlobalID"`
+	AssetID              string  `json:"objectid"`
 	Status               string  `json:"status"`
 	LatestEventStart     *string `json:"start_date_time_discharge"`
 	LatestEventEnd       *string `json:"stop_date_time_discharge"`
