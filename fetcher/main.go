@@ -27,7 +27,7 @@ func main() {
 		config = fetchConfig("./config.json")
 	} else {
 		if len(os.Args) < 2 {
-			log.Fatal("usage: cso-poller <config-path>")
+			log.Fatal("usage: sewagedata-poller <config-path>")
 		}
 		config = fetchConfig(os.Args[1])
 	}
