@@ -4,7 +4,8 @@ on:
   push:
     branches:
       - main
-
+    paths:
+      - 'api/**'
 jobs:
   deploy:
     runs-on: ubuntu-latest
