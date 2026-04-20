@@ -655,7 +655,7 @@ func (s SWWAsset) ToAsset() Asset {
 	}
 }
 
-// welsh water workarounds stupid shit
+// Workarounds because DWR Cymru uses a different format (annoying!)
 
 func (s DWRAsset) ToAsset(c DWRCoords) Asset {
 	return Asset{
