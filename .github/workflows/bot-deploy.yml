@@ -25,15 +25,16 @@ jobs:
       - name: Install dependencies
         working-directory: bsky-bot
         run: npm ci
-
-      - name: Rsync files to VPS
-        run: |
-          rsync -avz --delete \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            ./bsky-bot/ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/etc/sewagedata-socialbot/
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        
+      - name: Deploy files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: ./bsky-bot/
+          target: /etc/sewagedata-socialbot/
+          strip_components: 1
 
       - name: Install production deps & restart PM2
         uses: appleboy/ssh-action@v1
