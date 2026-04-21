@@ -1,0 +1,47 @@
+name: Deploy Social Bot
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bsky-bot/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: bsky-bot/package-lock.json
+
+      - name: Install dependencies
+        working-directory: bsky-bot
+        run: npm ci
+
+      - name: Rsync files to VPS
+        run: |
+          rsync -avz --delete \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            ./bsky-bot/ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/etc/sewagedata-socialbot/
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Install production deps & restart PM2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /etc/sewagedata-socialbot
+            npm ci --omit=dev
+            pm2 reload bsky-bot --update-env || pm2 start ecosystem.config.js
