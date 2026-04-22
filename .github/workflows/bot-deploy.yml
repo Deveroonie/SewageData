@@ -32,4 +32,4 @@ jobs:
             rm -rf /tmp/bsky-bot-deploy
             cd /etc/sewagedata-socialbot
             npm i --omit=dev
-            pm2 reload bsky-bot --update-env || pm2 start ecosystem.config.js
+            pm2 reload bsky-bot --update-env || pm2 start ecosystem.config.cjs
