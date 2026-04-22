@@ -12,28 +12,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+      - name: Deploy files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: ./bsky-bot/
+          target: /tmp/bsky-bot-deploy/
 
-      - name: Rsync files to VPS
-        run: |
-          rsync -avz --delete \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='.env' \
-            ./bsky-bot/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/sewagedata-socialbot/
-
-      - name: Install production deps & restart PM2
+      - name: Move files, install deps & restart PM2
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            rsync -a --exclude='.env' /tmp/bsky-bot-deploy/bsky-bot/ /etc/sewagedata-socialbot/
+            rm -rf /tmp/bsky-bot-deploy
             cd /etc/sewagedata-socialbot
             npm i --omit=dev
             pm2 reload bsky-bot --update-env || pm2 start ecosystem.config.js
