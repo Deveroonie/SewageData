@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "keywords": [],
   "author": "Deveroonie",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "@atproto/api": "^0.19.8",
