@@ -2,8 +2,8 @@ module.exports = {
   apps: [
     {
       name: 'bsky-bot',
-      script: 'npm',
-      args: 'start',
+      script: 'node',
+      args: '.',
       cwd: '/etc/sewagedata-socialbot',
       env: {
         NODE_ENV: 'production',
