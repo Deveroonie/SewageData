@@ -18,9 +18,8 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: ./bsky-bot/
+          source: ./bsky-bot/*
           target: /etc/sewagedata-socialbot/
-          strip_components: 1
 
       - name: Install production deps & restart PM2
         uses: appleboy/ssh-action@v1
