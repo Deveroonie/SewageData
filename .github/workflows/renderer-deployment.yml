@@ -44,4 +44,4 @@ jobs:
             cd /etc/sewagedata-image-renderer
             npm i --omit=dev
             PLAYWRIGHT_BROWSERS_PATH=/etc/sewagedata-image-renderer/.playwright npx playwright install chromium
-            pm2 reload image-renderer --update-env || pm2 start ecosystem.config.js
+            pm2 reload image-renderer --update-env || pm2 start /etc/sewagedata-image-renderer/ecosystem.config.cjs
