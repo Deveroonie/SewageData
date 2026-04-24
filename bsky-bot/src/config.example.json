@@ -1,0 +1,5 @@
+{
+    "useBsky": true,
+    "useMastodon": true,
+    "useRedisBsky": true
+}

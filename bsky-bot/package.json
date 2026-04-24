@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "main": "src/index.js",
+  "scripts": {
+    "dev": "nodemon ."
+  },
   "keywords": [],
   "author": "Deveroonie",
   "license": "MIT",
@@ -16,5 +19,8 @@
     "mysql2": "^3.22.1",
     "redis": "^5.12.1",
     "twitter-api-v2": "^1.29.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

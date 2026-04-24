@@ -1,5 +1,7 @@
 import { blueskyAdapter } from "./adaptors/bluesky.js";
 import { mastodonAdapter } from "./adaptors/mastodon.js";
+import config from "./config.json" with { type: "json" };
+import { getEventCount } from "./util/queries.js";
 
 export default async function post(postInfo) {
     const discharge = postInfo.discharge
@@ -13,8 +15,16 @@ export default async function post(postInfo) {
                         `⏰ This discharge started at ${datetoHHMM(discharge.latest_event_start)}`,
                         `🔗 https://sewagedata.co.uk/?asset=${discharge.asset_id}`
                     )
-                
-                await blueskyAdapter.post(text)
+
+                // Build the image
+                const count = (await getEventCount(discharge.asset_id))[0].count
+                const imageResponse = await fetch(`http://localhost:3040/render?latitude=${discharge.latitude}&longitude=${discharge.longitude}&locationcso=${discharge.receiving_watercourse}
+                    &bathingwater=${discharge.nearest_bw_name}&bwdist=${mtomi(discharge.nearest_bw_distance_m)}&bwrating=${discharge.nearest_bw_classification}&watercompany=${discharge.company}
+                    &count30d=${count}&start=${datetoHHMM(discharge.latest_event_start)}&csoid=${discharge.asset_id}`)
+                const blob = await imageResponse.blob()
+                const arrayBuffer = await blob.arrayBuffer()
+                const uint8Array = new Uint8Array(arrayBuffer)
+                await blueskyAdapter.post(text, uint8Array)
                 await mastodonAdapter.post(text)
                 break;
             }
@@ -26,8 +36,7 @@ export default async function post(postInfo) {
                     `⏰ This discharge started at ${datetoHHMM(discharge.latest_event_start)} ${datetoDDMMYYYY(discharge.latest_event_start)}`,
                     `🔗 https://sewagedata.co.uk/?asset=${discharge.asset_id}`
                 )
-                await blueskyAdapter.post(text)
-                await mastodonAdapter.post(text)
+                await postToAllEnabled(text)
                 break;
             }
 
@@ -39,13 +48,25 @@ export default async function post(postInfo) {
                     `⏰ This discharge started at ${datetoHHMM(discharge.latest_event_start)} ${datetoDDMMYYYY(discharge.latest_event_start)}, and ended at ${datetoHHMM(discharge.latest_event_end)} ${datetoDDMMYYYY(discharge.latest_event_end)}`,
                     `🔗 https://sewagedata.co.uk/?asset=${discharge.asset_id}`
                 )
-                await blueskyAdapter.post(text)
-                await mastodonAdapter.post(text)
+                
+                await postToAllEnabled(text)
+                
                 break;
             }
         }
     } catch(err) {
         console.log("An error has occoured in post.js -\n" + err)
+    }
+}
+
+async function postToAllEnabled(text) {
+    console.log(text)
+    if(config.useBsky) {
+        await blueskyAdapter.post(text)
+    }
+
+    if(config.useMastodon) {
+        await mastodonAdapter.post(text)
     }
 }
 

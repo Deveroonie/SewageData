@@ -4,8 +4,8 @@ export default class Adapter {
         this._login = login;
     }
 
-    async post(content) {
-        return this._post(content);
+    async post(content, image) {
+        return this._post(content, image);
     }
 
     async login(username, password) {

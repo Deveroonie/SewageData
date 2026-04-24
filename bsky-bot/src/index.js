@@ -1,10 +1,13 @@
 import { CronJob } from "cron";
 import run from "./run.js";
 import client from "./redis.js";
+import config from "./config.json" with { type: "json" };
 
 // Nuke stale sessions
-await client.del("bluesky:access")
-await client.del("bluesky:refresh")
+if (config.useRedisBsky) {
+    await client.del("bluesky:access")
+    await client.del("bluesky:refresh")
+}
 
 await run()
 

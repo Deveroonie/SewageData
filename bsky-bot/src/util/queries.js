@@ -1,5 +1,7 @@
 import connection from "../mysql.js";
 
+ const table = (process.env["ENV"] == "PRODUCTION"? "discharge_notifications" : "discharge_notifications_test")
+    console.log(table)
 async function getActiveDischarges() {
     const [rows] = await connection.query(`
     SELECT 
@@ -19,7 +21,7 @@ async function getActiveDischarges() {
         dn.notified_end
     FROM latest_state ls
     JOIN assets a ON ls.asset_id = a.asset_id
-    LEFT JOIN discharge_notifications dn 
+    LEFT JOIN ${table} dn 
     ON dn.asset_id = ls.asset_id 
     AND dn.event_start = ls.latest_event_start
     WHERE ls.status = 1
@@ -39,7 +41,7 @@ async function getPendingNotifications() {
            a.nearest_bw_name,
            a.nearest_bw_classification,
            a.nearest_bw_distance_m
-    FROM discharge_notifications dn
+    FROM ${table} dn
     LEFT JOIN latest_state ls ON dn.asset_id = ls.asset_id
     LEFT JOIN assets a ON dn.asset_id = a.asset_id
     WHERE dn.notified_end = 0
@@ -48,4 +50,13 @@ async function getPendingNotifications() {
     return rows
 }
 
-export { getActiveDischarges, getPendingNotifications }
+async function getEventCount(cso) {
+    const [rows] = await connection.query(`
+        SELECT COUNT(*) AS count
+        FROM events
+        WHERE asset_id = ?
+        AND event_start >= NOW() - INTERVAL 30 DAY`, [cso]
+    )
+    return rows
+}
+export { getActiveDischarges, getPendingNotifications, getEventCount }
