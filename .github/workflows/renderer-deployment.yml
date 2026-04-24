@@ -44,4 +44,4 @@ jobs:
             cd /etc/sewagedata-image-renderer
             npm i --omit=dev
             npx playwright install chromium
-            pm2 reload image-renderer --update-env || pm2 start server/index.js --name image-renderer
+            pm2 reload image-renderer --update-env || pm2 start ecosystem.config.js
