@@ -40,7 +40,7 @@ function App() {
           This discharge started at {start}.
         </p>
 
-        <p className="mt-auto">https://sewagedata.co.uk/?cso={csoid}<br />Bluesky: @alerts.sewagedata.co.uk<br />Mastodon: @sewagedata_alerts@mastodon.social<br />{new Date().getDate().toString().padStart(2, "0")}/{(new Date().getMonth()+1).toString().padStart(2, "0")}/{new Date().getFullYear()} {new Date().getHours().toString().padStart(2, "0")}:{new Date().getMinutes().toString().padStart(2, "0")}</p>
+        <p className="mt-auto">https://sewagedata.co.uk/?asset={csoid}<br />Bluesky: @alerts.sewagedata.co.uk<br />Mastodon: @sewagedata_alerts@mastodon.social<br />{new Date().getDate().toString().padStart(2, "0")}/{(new Date().getMonth()+1).toString().padStart(2, "0")}/{new Date().getFullYear()} {new Date().getHours().toString().padStart(2, "0")}:{new Date().getMinutes().toString().padStart(2, "0")}</p>
       </div>
 
       <div className="basis-3/5 min-w-0">
