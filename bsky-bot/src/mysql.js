@@ -1,3 +1,5 @@
+import { config as configDotEnv } from 'dotenv'
+configDotEnv({ quiet: true })
 import { createPool } from "mysql2/promise";
 const connection = createPool({
     host: process.env["MYSQL_HOST"],

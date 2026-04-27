@@ -1,5 +1,5 @@
-import { config } from 'dotenv'
-config({ quiet: true })
+import { config as configDotEnv } from 'dotenv'
+configDotEnv({ quiet: true })
 import "./instrument.js";
 import { CronJob } from "cron";
 import run from "./run.js";
