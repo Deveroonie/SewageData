@@ -1,3 +1,6 @@
+import { config } from 'dotenv'
+config({ quiet: true })
+import "./instrument.js";
 import { CronJob } from "cron";
 import run from "./run.js";
 import client from "./redis.js";
