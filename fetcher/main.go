@@ -659,7 +659,7 @@ func (s SWWAsset) ToAsset() Asset {
 
 func (s DWRAsset) ToAsset(c DWRCoords) Asset {
 	return Asset{
-		AssetID:              s.AssetID,
+		AssetID:              strconv.Itoa(s.AssetID),
 		Company:              "Dwr Cymru Welsh Water",
 		Status:               DWRStatusToStatus(s.Status),
 		StatusStart:          0,
@@ -838,8 +838,8 @@ type DWRFeatures struct {
 	Attributes  DWRAsset  `json:"attributes"`
 	Coordinates DWRCoords `json:"geometry"`
 }
-type DWRAsset struct { // absolute wankers
-	AssetID              string  `json:"objectid"`
+type DWRAsset struct {
+	AssetID              int     `json:"objectid"`
 	Status               string  `json:"status"`
 	LatestEventStart     *string `json:"start_date_time_discharge"`
 	LatestEventEnd       *string `json:"stop_date_time_discharge"`
