@@ -37,5 +37,5 @@ jobs:
             mv /etc/sewagedata-poller/tmp/sewagedata-poller /etc/sewagedata-poller/sewagedata-poller.new
             chmod +x /etc/sewagedata-poller/sewagedata-poller.new
             mv /etc/sewagedata-poller/sewagedata-poller.new /etc/sewagedata-poller/sewagedata-poller
-            systemctl restart cso-poller
-            systemctl is-active --quiet cso-poller && echo "Service is running" || echo "Service FAILED to start"
+            systemctl restart sewagedata-poller
+            systemctl is-active --quiet sewagedata-poller && echo "Service is running" || echo "Service FAILED to start"
