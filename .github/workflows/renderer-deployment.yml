@@ -5,6 +5,7 @@ on:
       - main
     paths:
       - 'social-bot-image-renderer/**'
+  workflow_dispatch: 
 jobs:
   deploy:
     runs-on: ubuntu-latest
