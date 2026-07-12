@@ -664,7 +664,7 @@ func (s SWWAsset) ToAsset() Asset {
 
 func (s DWRAsset) ToAsset(c DWRCoords) Asset {
 	return Asset{
-		AssetID:              strconv.Itoa(s.AssetID),
+		AssetID:              s.AssetID,
 		Company:              "Dwr Cymru Welsh Water",
 		Status:               DWRStatusToStatus(s.Status),
 		StatusStart:          0,
