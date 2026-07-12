@@ -844,7 +844,7 @@ type DWRFeatures struct {
 	Coordinates DWRCoords `json:"geometry"`
 }
 type DWRAsset struct {
-	AssetID              int     `json:"DCWW_ID"`
+	AssetID              string  `json:"DCWW_ID"`
 	Status               string  `json:"status"`
 	LatestEventStart     *string `json:"start_date_time_discharge"`
 	LatestEventEnd       *string `json:"stop_date_time_discharge"`
