@@ -328,7 +328,7 @@ func fetch(company string) ([]Asset, error) {
 	case "thames-water":
 		url = "https://services2.arcgis.com/g6o32ZDQ33GpCIu3/arcgis/rest/services/Thames_Water_Storm_Overflow_Activity_(Production)_view/FeatureServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=json"
 	case "southern-water":
-		url = "https://services-eu1.arcgis.com/XxS6FebPX29TRGDJ/arcgis/rest/services/Southern_Water_Storm_Overflow_Activity/FeatureServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=json"
+		url = "https://services-eu1.arcgis.com/6qJmARkS2dt2IjVA/arcgis/rest/services/SouthernWater_StormOverflowActivity_PROD_view/FeatureServer/0/query?outFields=*&where=1%3D1&f=json"
 	case "united-utilities":
 		url = "https://services5.arcgis.com/5eoLvR0f8HKb7HWP/arcgis/rest/services/United_Utilities_Storm_Overflow_Activity/FeatureServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=json"
 	case "anglian-water":
