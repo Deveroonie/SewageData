@@ -379,13 +379,15 @@ func fetchPage(url string, offset int, company string) (assets []Asset, err erro
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return nil, err, false
 	}
 	if company == "south-west-water" {
 		var result SWWArcGISResponse
 		err = json.Unmarshal(body, &result)
 		if err != nil {
-			log.Fatalln(err)
+			log.Println(err)
+			return nil, err, false
 		}
 		var returnres []Asset
 
@@ -399,7 +401,8 @@ func fetchPage(url string, offset int, company string) (assets []Asset, err erro
 		var result DWRArcGISResponse
 		err = json.Unmarshal(body, &result)
 		if err != nil {
-			log.Fatalln(err)
+			log.Println(err)
+			return nil, err, false
 		}
 		var returnres []Asset
 
@@ -412,7 +415,8 @@ func fetchPage(url string, offset int, company string) (assets []Asset, err erro
 	var result ArcGISResponse
 	err = json.Unmarshal(body, &result)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return nil, err, false
 	}
 	var returnres []Asset
 
@@ -440,7 +444,8 @@ func fetchPageScottishWater() (assets []Asset, err error) {
 	var result ScottishWaterResponse
 	err = json.Unmarshal(body, &result)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return nil, err
 	}
 	var returnres []Asset
 
