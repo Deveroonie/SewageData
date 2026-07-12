@@ -344,7 +344,7 @@ func fetch(company string) ([]Asset, error) {
 	case "south-west-water": // special cunts with their camel case
 		url = "https://services-eu1.arcgis.com/OMdMOtfhATJPcHe3/arcgis/rest/services/NEH_outlets_PROD/FeatureServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=json"
 	case "dwr-cymru":
-		url = "https://services3.arcgis.com/KLNF7YxtENPLYVey/arcgis/rest/services/Spill_Prod__view/FeatureServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=json"
+		url = "https://services3.arcgis.com/KLNF7YxtENPLYVey/arcgis/rest/services/Spill_Prod/FeatureServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=json"
 	}
 
 	if url == "" {
@@ -839,7 +839,7 @@ type DWRFeatures struct {
 	Coordinates DWRCoords `json:"geometry"`
 }
 type DWRAsset struct {
-	AssetID              int     `json:"objectid"`
+	AssetID              int     `json:"DCWW_ID"`
 	Status               string  `json:"status"`
 	LatestEventStart     *string `json:"start_date_time_discharge"`
 	LatestEventEnd       *string `json:"stop_date_time_discharge"`
