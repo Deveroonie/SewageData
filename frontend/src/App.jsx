@@ -11,6 +11,7 @@ import MobileCSOs from './components/homepage-stats/MobileCSOs';
 import DesktopCSOs from './components/homepage-stats/DesktopCSOs';
 import minutesAgo from './util/minutesAgo';
 import base from "./api_base"
+import { NavLink } from 'react-router';
 
 
 function App() {
@@ -140,7 +141,7 @@ const geojson = {
       <div className='flex flex-col h-screen'>
           <div className='shrink-0 bg-brown text-white px-8 py-4 text-center'>
             <span className='lg:text-3xl text-xl font-bold'>Sewage Data - Map</span>
-            <p className='lg:text-lg text-sm'>A live map showing sewage discharges from all water companies across England, Wales* and Scotland.</p>
+            <p className='lg:text-lg text-sm'>A live map showing sewage discharges from all water companies across England, Wales* and Scotland.<br />We have historic discharges! Click <NavLink className={"underline"} to="/historical">here</NavLink> to see discharges prior to March 1st, 2026.</p>
             <span className='text-gray-300 italic lg:text-sm text-xs'>*excludes Hafren Dyfrdwy<br />Tracking for events began on 01/03/2026. Events before this date will not be displayed.</span><br />
             <p className='lg:text-lg font-semibold'>
               <span className='p-2 rounded-lg font-bold bg-brown-800'>{stats?.total_discharging || "..."}</span> CSOs discharging right now.

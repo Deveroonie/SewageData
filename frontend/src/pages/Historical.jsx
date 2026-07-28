@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import base from "../api_base"
 import { createColumnHelper, flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from "@tanstack/react-table";
+import { NavLink } from "react-router";
 
 export default function Historical() {
     const [stats,setStats] = useState(null)
@@ -141,6 +142,7 @@ export default function Historical() {
                 <span className='lg:text-3xl text-xl font-bold'>Sewage Data - Historical</span>
                 <p className='lg:text-lg text-sm'>We have managed to obtain historical discharge data - similar to the 'historical' data shown on our Live Map - for most Sewage companies in Great Britain. This page shows what we have managed to interpret.<br />
                 We have inserted data from <b>{stats.total.toLocaleString()}</b> distinct CSOs. Of that, we have managed to map this data to <b>{stats.matched.toLocaleString()}</b> CSOs that are already in our database. Each pin represents a CSO with historical data - click on the pin to see it's discharge history!</p>
+                Click <NavLink className={"underline"} to="/">here</NavLink> to return to our live map.
             </div>
             <div className="flex flex-row h-[70vh] shrink-0">
                 <div className="grow">
