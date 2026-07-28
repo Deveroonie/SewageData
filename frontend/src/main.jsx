@@ -1,8 +1,10 @@
-import { StrictMode } from 'react'
+import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import * as Sentry from "@sentry/react";
+import Historical from "./pages/Historical.jsx";
+import { useEffect } from "react";
 
 
 Sentry.init({
@@ -18,5 +20,22 @@ Sentry.init({
 });
 
 const container = document.getElementById("root");
-const root = createRoot(container);
-root.render(<App />);
+createRoot(container).render(
+    <BrowserRouter>
+      <PageTracker />
+      <Routes>
+          <Route path="/" element={<App />} />
+          <Route path="/historical" element={<Historical />} />
+      </Routes>
+    </BrowserRouter>,
+)
+
+function PageTracker() {
+  const location = useLocation();
+  useEffect(() => {
+    if (window.umami) {
+      window.umami.track((props) => ({ ...props, url: location.pathname + location.search }));
+    }
+  }, [location]);
+  return null;
+}

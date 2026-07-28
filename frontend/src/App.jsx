@@ -10,7 +10,7 @@ import DesktopCompanies from './components/homepage-stats/DesktopCompanies';
 import MobileCSOs from './components/homepage-stats/MobileCSOs';
 import DesktopCSOs from './components/homepage-stats/DesktopCSOs';
 import minutesAgo from './util/minutesAgo';
-const base = "https://api.sewagedata.co.uk"
+import base from "./api_base"
 
 
 function App() {

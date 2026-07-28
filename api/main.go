@@ -67,6 +67,9 @@ func main() {
 	r.GET("/api/asset/:id/events", getAssetEvents)
 	r.GET("/api/stats", getStats)
 	r.GET("/api/top-discharges", getTopDischarges)
+	r.GET("/api/asset/:id/historic-events/has-historic-events", hasHistoricEvents)
+	r.GET("/api/asset/:id/historic-events", getHistoricEvents)
+	r.GET("/api/assets/historic-events/assets-with-historic-events", getAssetsWithHistoricEvents)
 	r.Run(":8080")
 }
 
@@ -314,6 +317,119 @@ LIMIT 20
 
 	c.JSON(200, response)
 }
+func hasHistoricEvents(c *gin.Context) {
+	assetId := c.Param("id")
+	rows, err := db.Query(`
+    	SELECT event_end FROM events_historical WHERE asset_id = ? ORDER BY event_end ASC LIMIT 1
+	`, assetId)
+
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	var response HasHistoricEvents
+	response.AssetID = assetId
+	if rows.Next() {
+		response.HasHistoricEvents = true
+		var FirstHistoricEvent *time.Time
+		rows.Scan(&FirstHistoricEvent)
+		response.FirstHistoricEvent = FirstHistoricEvent
+	} else {
+		response.HasHistoricEvents = false
+	}
+	c.JSON(200, response)
+}
+func getHistoricEvents(c *gin.Context) {
+	assetId := c.Param("id")
+	rows, err := db.Query(`SELECT 
+    asset_id,
+    event_start,
+    event_end,
+    TIMESTAMPDIFF(MINUTE, event_start, event_end) as duration_minutes
+FROM events_historical
+WHERE asset_id = ?
+ORDER BY event_start DESC`, assetId)
+
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	var response EventsResponse
+	for rows.Next() {
+		var assetId string
+		var eventStart time.Time
+		var eventEnd time.Time
+		var durationMinutes int
+
+		err := rows.Scan(&assetId, &eventStart, &eventEnd, &durationMinutes)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		event := Event{
+			assetId,
+			eventStart,
+			eventEnd,
+			durationMinutes,
+		}
+		response.Events = append(response.Events, event)
+	}
+	c.JSON(200, response)
+}
+func getAssetsWithHistoricEvents(c *gin.Context) {
+	rows, err := db.Query(`
+SELECT a.asset_id,
+       
+		a.company,
+        a.latitude,
+        a.longitude
+    FROM assets a
+	WHERE a.asset_id in (
+        SELECT DISTINCT asset_id FROM events_historical
+)
+`)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	var response HistoricAssetsResponse
+	for rows.Next() {
+		var assetId string
+		var company string
+		var latitude float64
+		var longitude float64
+
+		err := rows.Scan(&assetId, &company, &latitude, &longitude)
+		if err != nil {
+			return
+		}
+
+		asset := HistoricMinimalAsset{
+			assetId,
+			company,
+			latitude,
+			longitude,
+		}
+
+		response.Assets = append(response.Assets, asset)
+	}
+	err = db.QueryRow("SELECT COUNT(DISTINCT asset_id) FROM events_historical").Scan(&response.Total)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	err = db.QueryRow("SELECT COUNT(DISTINCT eh.asset_id) FROM events_historical eh LEFT JOIN assets a ON a.asset_id = eh.asset_id WHERE a.asset_id IS NULL").Scan(&response.UnmatchedTotal)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(200, response)
+}
 
 func fetchConfig(path string) Config {
 	data, err := os.ReadFile(path)
@@ -392,6 +508,24 @@ type TopDischarge struct {
 	Company              string    `json:"company"`
 	ReceivingWaterCourse string    `json:"receiving_watercourse"`
 	DischargeStart       time.Time `json:"discharge_start"`
+}
+
+type HasHistoricEvents struct {
+	AssetID            string     `json:"asset_id"`
+	HasHistoricEvents  bool       `json:"has_historic_events"`
+	FirstHistoricEvent *time.Time `json:"first_historic_event"`
+}
+type HistoricMinimalAsset struct {
+	AssetId   string  `json:"asset_id"`
+	Company   string  `json:"company"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+type HistoricAssetsResponse struct {
+	Total          int                    `json:"total_assets"`
+	UnmatchedTotal int                    `json:"unmatched_total"`
+	Assets         []HistoricMinimalAsset `json:"assets"`
 }
 
 type Config struct {

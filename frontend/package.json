@@ -15,11 +15,13 @@
     "@fortawesome/react-fontawesome": "^3.3.0",
     "@sentry/react": "^10.45.0",
     "@tailwindcss/vite": "^4.2.1",
+    "@tanstack/react-table": "^8.21.3",
     "axios": "^1.13.6",
     "maplibre-gl": "^5.19.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-map-gl": "^8.1.0",
+    "react-router": "^8.3.0",
     "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
