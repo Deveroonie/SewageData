@@ -4,6 +4,9 @@ module.exports = {
       name: "image-renderer",
       script: "/etc/sewagedata-image-renderer/server/index.js",
       cwd: "/etc/sewagedata-image-renderer",
+      env: {
+        PLAYWRIGHT_BROWSERS_PATH: "/root/.cache/ms-playwright"
+      }
     }
   ]
 }
