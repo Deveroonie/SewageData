@@ -17,6 +17,7 @@ export default async function run() {
         for (const item of validated) await update(item)
     } catch (err) {
         console.log("An error has occoured in run.js -\n" + err)
+        console.log(err)
     } finally {
         running = false
     }
