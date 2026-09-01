@@ -42,6 +42,8 @@ jobs:
           script: |
             rsync -a /tmp/deploy/social-bot-image-renderer/ /etc/sewagedata-image-renderer/
             rm -rf /tmp/deploy
+            export NVM_DIR="/root/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             cd /etc/sewagedata-image-renderer
             npm i --omit=dev
             PLAYWRIGHT_BROWSERS_PATH=/etc/sewagedata-image-renderer/.playwright npx playwright install chromium
