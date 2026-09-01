@@ -31,6 +31,8 @@ jobs:
           script: |
             rsync -a --exclude='.env' /tmp/bsky-bot-deploy/bsky-bot/ /etc/sewagedata-socialbot/
             rm -rf /tmp/bsky-bot-deploy
+            export NVM_DIR="/root/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             cd /etc/sewagedata-socialbot
             npm i --omit=dev
             pm2 reload bsky-bot --update-env || pm2 start ecosystem.config.cjs
