@@ -37,13 +37,20 @@ func logOnce(key string, format string, args ...any) {
 func main() {
 	var config Config
 	dev := os.Getenv("FETCHER_IS_DEV")
-	if dev != "" {
+	if dev != "" && dev != "0" && !strings.EqualFold(dev, "false") {
 		config = fetchConfig("./config.json")
 	} else {
 		if len(os.Args) < 2 {
 			log.Fatal("usage: sewagedata-poller <config-path>")
 		}
 		config = fetchConfig(os.Args[1])
+	}
+	if config.PollInterval <= 0 {
+		log.Fatal("config: poll_interval must be a positive number of seconds")
+	}
+	bathingWaterInterval := 24 * time.Hour
+	if config.BathingWaterUpdateInterval > 0 {
+		bathingWaterInterval = time.Duration(config.BathingWaterUpdateInterval) * time.Minute
 	}
 
 	cfg := mysql.NewConfig()
@@ -53,6 +60,8 @@ func main() {
 	cfg.Addr = config.DBHost
 	cfg.ParseTime = true
 	cfg.DBName = config.DBName
+	// Optional: "true", "skip-verify" or "preferred". Unset means no TLS.
+	cfg.TLSConfig = config.DBTLS
 
 	var err error
 	db, err = sql.Open("mysql", cfg.FormatDSN())
@@ -67,7 +76,7 @@ func main() {
 
 	go func() {
 		updateBathingWater()
-		bwTicker := time.NewTicker(24 * time.Hour)
+		bwTicker := time.NewTicker(bathingWaterInterval)
 		defer bwTicker.Stop()
 		for range bwTicker.C {
 			updateBathingWater()
@@ -75,7 +84,7 @@ func main() {
 	}()
 
 	poll()
-	ticker := time.NewTicker(time.Duration(config.PollInterval) * time.Second) // Create a ticker that ticks every 2 seconds
+	ticker := time.NewTicker(time.Duration(config.PollInterval) * time.Second) // Create a ticker that ticks every poll_interval seconds
 	defer ticker.Stop()                                                        // Ensure the ticker stops when done
 
 	for range ticker.C {
@@ -172,15 +181,29 @@ func poll() {
 	state, err := loadLatestState()
 	if err != nil {
 		log.Println("failed to load state:", err)
+		lastPoll = map[string]observation{}
 		return
 	}
+	seen := make(map[string]observation, len(assets))
 	for _, asset := range assets {
-		err = updateState(asset, state)
+		err = updateState(asset, state, lastPoll)
 		if err != nil {
 			log.Println(err)
 		}
+		seen[asset.AssetID] = observation{Status: asset.Status, EventStart: msPtrToTime(asset.LatestEventStart)}
 	}
+	lastPoll = seen
 	log.Printf("[POLL] Completed in %s\n", time.Since(start))
+}
+
+// lastPoll is what the previous poll saw in each feed. It's empty after a
+// restart and leaves out assets whose company failed to fetch, so it tells a
+// status change we watched happen apart from a stored status that's just stale.
+var lastPoll = map[string]observation{}
+
+type observation struct {
+	Status     int
+	EventStart *time.Time
 }
 
 // dedupeAssets drops repeated asset IDs, keeping the first. Some feeds list the
@@ -219,7 +242,7 @@ func fetchConfig(path string) Config {
 }
 
 func loadLatestState() (map[string]LatestState, error) {
-	rows, err := db.Query("SELECT asset_id, latest_event_start, latest_event_end, polled_at FROM latest_state")
+	rows, err := db.Query("SELECT asset_id, status, status_start, latest_event_start, latest_event_end, polled_at FROM latest_state")
 	if err != nil {
 		return nil, err
 	}
@@ -227,77 +250,208 @@ func loadLatestState() (map[string]LatestState, error) {
 	latestState := make(map[string]LatestState)
 	for rows.Next() {
 		var assetID string
+		var status *int
+		var statusStart *time.Time
 		var latestEventStart *time.Time
 		var latestEventEnd *time.Time
 		var polledAt time.Time
-		err = rows.Scan(&assetID, &latestEventStart, &latestEventEnd, &polledAt)
+		err = rows.Scan(&assetID, &status, &statusStart, &latestEventStart, &latestEventEnd, &polledAt)
 		if err != nil {
 			return nil, err
 		}
 		latestState[assetID] = LatestState{
+			Status:           status,
+			StatusStart:      statusStart,
 			LatestEventStart: latestEventStart,
 			LatestEventEnd:   latestEventEnd,
 			PolledAt:         polledAt,
 			AssetID:          assetID,
 		}
 	}
+	// A connection dropped mid-read ends the loop early; a partial map would
+	// make every missing asset look brand new.
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
 	return latestState, nil
 }
 
-func updateState(asset Asset, state map[string]LatestState) error {
-	assetState := state[asset.AssetID]
-	_, assetExists := state[asset.AssetID]
-	if !assetExists {
+// eventRow is a finished event to upsert into events. Rows are only written
+// once they have both a start and an end: the API can't read events with a
+// NULL end.
+type eventRow struct {
+	Start       time.Time
+	End         time.Time
+	DetectedAt  time.Time
+	CompletedAt time.Time
+}
+
+// stateChange is what one poll needs to write for one asset.
+type stateChange struct {
+	InsertState  bool       // first time we've seen the asset
+	UpdateState  bool       // the event changed: rewrite latest_state, including polled_at
+	UpdateStatus bool       // only the status changed: polled_at keeps its meaning
+	Events       []eventRow // finished events to record
+	Lost         *time.Time // start of an event replaced before the feed reported its end
+	ResumedAt    *time.Time // a reopened event: write this as status_start instead of the feed's
+}
+
+// planStateChange compares what a feed says about an asset now with what we
+// stored last time and works out what to write. It doesn't touch the database.
+func planStateChange(asset Asset, prev LatestState, exists bool, now time.Time) stateChange {
+	if !exists {
 		// First time we've seen this asset, just record state
-		_, err := db.Exec(
-			"INSERT INTO latest_state (asset_id, status, status_start, latest_event_start, latest_event_end, last_updated, polled_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			asset.AssetID, asset.Status, msToTime(asset.StatusStart), msPtrToTime(asset.LatestEventStart), msPtrToTime(asset.LatestEventEnd), msToTime(asset.LastUpdated), time.Now().UTC(),
-		)
-		if err != nil {
-			return err
+		return stateChange{InsertState: true}
+	}
+
+	var change stateChange
+	start := msPtrToTime(asset.LatestEventStart)
+	end := msPtrToTime(asset.LatestEventEnd)
+	statusStart := msToTime(asset.StatusStart)
+
+	switch {
+	case !timePtrEqual(start, prev.LatestEventStart):
+		change.UpdateState = true
+		if start != nil && ((prev.LatestEventStart != nil && start.Before(*prev.LatestEventStart)) ||
+			(prev.LatestEventEnd != nil && start.Before(*prev.LatestEventEnd))) {
+			// Events don't overlap, so a start before the event we're tracking
+			// (or before its end) is the feed correcting that event, not a new one.
+			// If it was still open it has no events row yet, so a corrected
+			// version that has already finished has to be recorded now.
+			if prev.LatestEventEnd == nil && isFinished(start, end) {
+				change.Events = append(change.Events, eventRow{*start, *end, prev.PolledAt, now})
+			}
+			break
 		}
-	} else {
-		apiEventStart := msPtrToTime(asset.LatestEventStart)
-		apiEventEnd := msPtrToTime(asset.LatestEventEnd)
-		if !timePtrEqual(apiEventStart, assetState.LatestEventStart) {
-			// New event detected - update state, don't write to events yet
-			_, err := db.Exec(
-				"UPDATE latest_state SET status = ?, status_start = ?, latest_event_start = ?, latest_event_end = ?, last_updated = ?, polled_at = ? WHERE asset_id = ?",
-				asset.Status, msToTime(asset.StatusStart), msPtrToTime(asset.LatestEventStart), msPtrToTime(asset.LatestEventEnd), msToTime(asset.LastUpdated), time.Now().UTC(), asset.AssetID,
-			)
-			if err != nil {
-				return err
-			}
 
-		} else if !timePtrEqual(apiEventEnd, assetState.LatestEventEnd) {
-			// Event has now completed - write to events using polled_at as detected_at
-			var completedAt *time.Time
-			if asset.LatestEventEnd != nil {
-				t := time.Now().UTC()
-				completedAt = &t
-			}
+		// New event. Before moving on, make sure the one it replaced is recorded.
+		prevOpen := prev.LatestEventStart != nil && prev.LatestEventEnd == nil
+		recovered := false
 
-			_, err := db.Exec(
-				`INSERT INTO events (asset_id, event_start, event_end, detected_at, completed_at)
+		// Scottish Water also publishes the event before the current one.
+		// That gives the end of an event we saw start, or a whole event that
+		// happened between polls.
+		previousStart := msPtrToTime(asset.PreviousEventStart)
+		previousEnd := msPtrToTime(asset.PreviousEventEnd)
+		if isFinished(previousStart, previousEnd) && !timePtrEqual(previousStart, start) {
+			sameAsTracked := timePtrEqual(previousStart, prev.LatestEventStart)
+			switch {
+			case sameAsTracked && prevOpen:
+				change.Events = append(change.Events, eventRow{*previousStart, *previousEnd, prev.PolledAt, now})
+				recovered = true
+			case !sameAsTracked:
+				change.Events = append(change.Events, eventRow{*previousStart, *previousEnd, now, now})
+			}
+		}
+		if prevOpen && !recovered {
+			change.Lost = prev.LatestEventStart
+		}
+
+		// A new event that has already finished won't change again, so this is
+		// the only chance to record it.
+		if isFinished(start, end) {
+			change.Events = append(change.Events, eventRow{*start, *end, now, now})
+		}
+
+	case !timePtrEqual(end, prev.LatestEventEnd):
+		// The event has finished, or its end was revised: record it using
+		// polled_at (when we saw it start) as detected_at. If the end has gone
+		// back to NULL the event has reopened; leave its events row alone
+		// rather than wiping the end we recorded.
+		change.UpdateState = true
+		if isFinished(start, end) {
+			change.Events = append(change.Events, eventRow{*start, *end, prev.PolledAt, now})
+		}
+		if end == nil && prev.LatestEventEnd != nil && asset.Status == 1 {
+			// Discharging again. The part up to the recorded end is already in
+			// events, so count the ongoing spill from there; starting it at the
+			// event's start would count that part twice.
+			resumed := *prev.LatestEventEnd
+			if statusStart != nil && statusStart.After(resumed) {
+				resumed = *statusStart
+			}
+			change.ResumedAt = &resumed
+		}
+
+	case prev.Status == nil || *prev.Status != asset.Status ||
+		(prev.StatusStart == nil && statusStart != nil):
+		// Status changed without a new event, e.g. a monitor going offline.
+		change.UpdateStatus = true
+
+		// United Utilities often stops a discharge without ever filling in
+		// LatestEventEnd. When the previous poll saw it discharging and this one
+		// doesn't, the time the status changed is when the discharge stopped. A
+		// real end arriving later overwrites this through the branch above.
+		// Without that observation (after a restart, a failed fetch, or a stored
+		// status the old fetcher never updated) or after an offline spell
+		// (-1 -> 0), the status change may only say when the monitor came back,
+		// so nothing is recorded.
+		if prev.Status != nil && *prev.Status == 1 && asset.Status == 0 &&
+			prev.SeenLastPoll != nil && prev.SeenLastPoll.Status == 1 &&
+			timePtrEqual(prev.SeenLastPoll.EventStart, start) &&
+			end == nil && isFinished(start, statusStart) {
+			change.Events = append(change.Events, eventRow{*start, *statusStart, prev.PolledAt, now})
+		}
+	}
+	return change
+}
+
+func isFinished(start *time.Time, end *time.Time) bool {
+	return start != nil && end != nil && !end.Before(*start)
+}
+
+func updateState(asset Asset, state map[string]LatestState, lastPoll map[string]observation) error {
+	prev, exists := state[asset.AssetID]
+	if seen, ok := lastPoll[asset.AssetID]; ok {
+		prev.SeenLastPoll = &seen
+	}
+	now := time.Now().UTC()
+	change := planStateChange(asset, prev, exists, now)
+
+	if change.Lost != nil {
+		log.Printf("[STATE] %s: event starting %s was replaced before the feed reported its end\n",
+			asset.AssetID, change.Lost.Format(time.RFC3339))
+	}
+
+	// Write events before latest_state: if anything fails, the next poll sees
+	// the same change again and the upsert makes the retry harmless.
+	for _, event := range change.Events {
+		_, err := db.Exec(
+			`INSERT INTO events (asset_id, event_start, event_end, detected_at, completed_at)
     VALUES (?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
         event_end = VALUES(event_end),
         completed_at = VALUES(completed_at)`,
-				asset.AssetID, msPtrToTime(asset.LatestEventStart), msPtrToTime(asset.LatestEventEnd), assetState.PolledAt, completedAt,
-			)
-			if err != nil {
-				return err
-			}
-
-			// Update latest_state
-			_, err = db.Exec(
-				"UPDATE latest_state SET status = ?, status_start = ?, latest_event_start = ?, latest_event_end = ?, last_updated = ?, polled_at = ? WHERE asset_id = ?",
-				asset.Status, msToTime(asset.StatusStart), msPtrToTime(asset.LatestEventStart), msPtrToTime(asset.LatestEventEnd), msToTime(asset.LastUpdated), time.Now().UTC(), asset.AssetID,
-			)
-			if err != nil {
-				return err
-			}
+			asset.AssetID, event.Start, event.End, event.DetectedAt, event.CompletedAt,
+		)
+		if err != nil {
+			return err
 		}
+	}
+
+	switch {
+	case change.InsertState:
+		_, err := db.Exec(
+			"INSERT INTO latest_state (asset_id, status, status_start, latest_event_start, latest_event_end, last_updated, polled_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			asset.AssetID, asset.Status, msToTime(asset.StatusStart), msPtrToTime(asset.LatestEventStart), msPtrToTime(asset.LatestEventEnd), msToTime(asset.LastUpdated), now,
+		)
+		return err
+	case change.UpdateState:
+		statusStart := msToTime(asset.StatusStart)
+		if change.ResumedAt != nil {
+			statusStart = change.ResumedAt
+		}
+		_, err := db.Exec(
+			"UPDATE latest_state SET status = ?, status_start = ?, latest_event_start = ?, latest_event_end = ?, last_updated = ?, polled_at = ? WHERE asset_id = ?",
+			asset.Status, statusStart, msPtrToTime(asset.LatestEventStart), msPtrToTime(asset.LatestEventEnd), msToTime(asset.LastUpdated), now, asset.AssetID,
+		)
+		return err
+	case change.UpdateStatus:
+		_, err := db.Exec(
+			"UPDATE latest_state SET status = ?, status_start = ?, last_updated = ? WHERE asset_id = ?",
+			asset.Status, msToTime(asset.StatusStart), msToTime(asset.LastUpdated), asset.AssetID,
+		)
+		return err
 	}
 	return nil
 }
@@ -345,7 +499,14 @@ func upsertAssetChunk(assets []Asset) error {
 	for i := range assets {
 		placeholders[i] = "(?, ?, ?, ?, ?, ?)"
 	}
-	query := "INSERT IGNORE INTO assets (asset_id, company, receiving_watercourse, latitude, longitude, first_seen) VALUES " + strings.Join(placeholders, ",")
+	// Keep details current when a company moves or renames an asset, but don't
+	// let a blank value in one poll wipe out a good one.
+	query := "INSERT INTO assets (asset_id, company, receiving_watercourse, latitude, longitude, first_seen) VALUES " + strings.Join(placeholders, ",") +
+		" ON DUPLICATE KEY UPDATE" +
+		" company = COALESCE(NULLIF(VALUES(company), ''), company)," +
+		" receiving_watercourse = COALESCE(NULLIF(VALUES(receiving_watercourse), ''), receiving_watercourse)," +
+		" latitude = IF(VALUES(latitude) = 0 OR VALUES(longitude) = 0, latitude, VALUES(latitude))," +
+		" longitude = IF(VALUES(latitude) = 0 OR VALUES(longitude) = 0, longitude, VALUES(longitude))"
 
 	var args []interface{}
 	for _, asset := range assets {
@@ -640,6 +801,9 @@ func updateNearestBathingWater() error {
 			Longitude: Longitude,
 		}
 	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
 	rows.Close()
 	rows, err = db.Query("SELECT id, name, latitude, longitude, classification FROM bathing_waters")
 	if err != nil {
@@ -657,6 +821,10 @@ func updateNearestBathingWater() error {
 		if err != nil {
 			return err
 		}
+		if Classification == "Closed" {
+			// Not a bathing water any more; match the next nearest open one.
+			continue
+		}
 		bathingWaters = append(bathingWaters, BathingWater{
 			ID:             BathingWaterID,
 			Name:           BathingWaterName,
@@ -665,8 +833,16 @@ func updateNearestBathingWater() error {
 			Classification: Classification,
 		})
 	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	if len(bathingWaters) == 0 {
+		// Nothing to compare against; don't clear every asset's nearest bathing water.
+		return nil
+	}
 
 	var results []NearestBathingWaterResult
+	var outOfRange []string
 
 	for _, asset := range assets {
 		var nearest BathingWater
@@ -681,6 +857,7 @@ func updateNearestBathingWater() error {
 		}
 
 		if nearestDist == -1 || nearestDist > 10000 {
+			outOfRange = append(outOfRange, asset.AssetID)
 			continue
 		}
 
@@ -701,6 +878,25 @@ func updateNearestBathingWater() error {
 		}
 	}
 
+	return clearNearestBathingWater(outOfRange)
+}
+
+// clearNearestBathingWater removes stale matches from assets that no longer
+// have a bathing water within range (it moved, or the asset did).
+func clearNearestBathingWater(assetIDs []string) error {
+	chunkSize := 1000
+	for i := 0; i < len(assetIDs); i += chunkSize {
+		chunk := assetIDs[i:min(i+chunkSize, len(assetIDs))]
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]interface{}, len(chunk))
+		for j, id := range chunk {
+			args[j] = id
+		}
+		_, err := db.Exec("UPDATE assets SET nearest_bw_id = NULL, nearest_bw_name = NULL, nearest_bw_classification = NULL, nearest_bw_distance_m = NULL WHERE nearest_bw_id IS NOT NULL AND asset_id IN ("+placeholders+")", args...)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -738,18 +934,35 @@ func (s SWWAsset) ToAsset() Asset {
 // Workarounds because DWR Cymru uses a different format (annoying!)
 
 func (s DWRAsset) ToAsset(c DWRCoords) Asset {
+	status := DWRStatusToStatus(s.Status)
+	start := parseISOToMillis(s.LatestEventStart)
+	end := parseISOToMillis(s.LatestEventEnd)
 	return Asset{
 		AssetID:              s.AssetID,
 		Company:              "Dwr Cymru Welsh Water",
-		Status:               DWRStatusToStatus(s.Status),
-		StatusStart:          0,
-		LatestEventStart:     parseISOToMillis(s.LatestEventStart),
-		LatestEventEnd:       parseISOToMillis(s.LatestEventEnd),
+		Status:               status,
+		StatusStart:          statusStartFromEvent(status, start, end),
+		LatestEventStart:     start,
+		LatestEventEnd:       end,
 		Longitude:            c.Longitude,
 		Latitude:             c.Latitude,
 		ReceivingWaterCourse: s.ReceivingWaterCourse,
 		LastUpdated:          s.LastUpdated,
 	}
+}
+
+// statusStartFromEvent works out when the current status began for feeds
+// that don't publish it: a discharge began when the event started, and
+// "not discharging" began when it ended. The API needs this to count spills
+// that are still going.
+func statusStartFromEvent(status int, start *int64, end *int64) int64 {
+	switch {
+	case status == 1 && start != nil && end == nil:
+		return *start
+	case status == 0 && end != nil:
+		return *end
+	}
+	return 0
 }
 func DWRStatusToStatus(dwrstatus string) int {
 	switch dwrstatus {
@@ -835,17 +1048,22 @@ func parseCoordsSW(s string) float64 {
 }
 
 func (s ScottishWaterAsset) ToAsset() Asset {
+	status := ScottishWaterStatusToStatus(s.Status)
+	start := parseISOToMillisSWPtr(s.LatestEventStart)
+	end := parseISOToMillisSWPtr(s.LatestEventEnd)
 	return Asset{
 		AssetID:              s.AssetID,
 		Company:              "Scottish Water",
-		Status:               ScottishWaterStatusToStatus(s.Status),
-		StatusStart:          0,
-		LatestEventStart:     parseISOToMillisSWPtr(s.LatestEventStart),
-		LatestEventEnd:       parseISOToMillisSWPtr(s.LatestEventEnd),
+		Status:               status,
+		StatusStart:          statusStartFromEvent(status, start, end),
+		LatestEventStart:     start,
+		LatestEventEnd:       end,
 		Longitude:            parseCoordsSW(s.Longitude),
 		Latitude:             parseCoordsSW(s.Latitude),
 		ReceivingWaterCourse: s.ReceivingWaterCourse,
 		LastUpdated:          parseISOToMillisSW(s.LastUpdated),
+		PreviousEventStart:   parseISOToMillisSWPtr(s.PreviousEventStart),
+		PreviousEventEnd:     parseISOToMillisSWPtr(s.PreviousEventEnd),
 	}
 }
 
@@ -871,6 +1089,8 @@ type ScottishWaterAsset struct {
 	Latitude             string  `json:"DISCHARGE_OVERFLOW_LOCATION_LATITUDE"`
 	ReceivingWaterCourse string  `json:"RECEIVING_WATER"`
 	LastUpdated          string  `json:"LAST_TRANSMITTED_DATETIME"`
+	PreviousEventStart   *string `json:"OVERFLOW_START_DATETIME_PREVIOUS"`
+	PreviousEventEnd     *string `json:"OVERFLOW_END_DATETIME_PREVIOUS"`
 }
 
 type ArcGISResponse struct {
@@ -892,6 +1112,9 @@ type Asset struct {
 	Latitude             float64 `json:"Latitude"`
 	ReceivingWaterCourse string  `json:"ReceivingWaterCourse"`
 	LastUpdated          int64   `json:"LastUpdated"`
+	// The event before the latest one. Only Scottish Water publishes this.
+	PreviousEventStart *int64 `json:"-"`
+	PreviousEventEnd   *int64 `json:"-"`
 }
 type MinimalAsset struct {
 	AssetID   string
@@ -943,10 +1166,13 @@ type DWRCoords struct {
 
 type LatestState struct {
 	AssetID          string
-	Status           int
+	Status           *int
+	StatusStart      *time.Time
 	LatestEventStart *time.Time
 	LatestEventEnd   *time.Time
 	PolledAt         time.Time
+	// What the previous poll in this process saw; nil after a restart or a failed fetch.
+	SeenLastPoll *observation
 }
 type EABathingWaterResponse struct {
 	Result struct {
@@ -994,6 +1220,7 @@ type Config struct {
 	DBUser                     string `json:"db_user"`
 	DBPass                     string `json:"db_pass"`
 	DBName                     string `json:"db_name"`
-	PollInterval               int    `json:"poll_interval"`
-	BathingWaterUpdateInterval int    `json:"bathing_water_update_interval"`
+	PollInterval               int    `json:"poll_interval"`                 // seconds
+	BathingWaterUpdateInterval int    `json:"bathing_water_update_interval"` // minutes; defaults to 1440
+	DBTLS                      string `json:"db_tls"`                        // optional mysql tls mode
 }
