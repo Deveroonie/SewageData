@@ -26,6 +26,7 @@ async function getActiveDischarges() {
     ON dn.asset_id = ls.asset_id 
     AND dn.event_start = ls.latest_event_start
     WHERE ls.status = 1
+    AND a.asset_removed IS NOT TRUE
     AND a.nearest_bw_distance_m IS NOT NULL
     AND a.nearest_bw_distance_m <= 3218
     AND a.nearest_bw_classification != 'Closed'
@@ -49,6 +50,7 @@ async function getPendingNotifications() {
            ls.status,
            (ls.latest_event_start <=> dn.event_start) AS is_current_event,
            a.company,
+           a.asset_removed,
            a.nearest_bw_name,
            a.nearest_bw_classification,
            a.nearest_bw_distance_m

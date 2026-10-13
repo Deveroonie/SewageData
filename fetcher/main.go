@@ -92,85 +92,36 @@ func main() {
 	}
 }
 
+// arcgisCompanies are the feeds fetch() knows; Scottish Water is fetched separately.
+var arcgisCompanies = []string{
+	"thames-water", "southern-water", "united-utilities", "anglian-water", "northumbrian-water",
+	"severn-trent-water", "wessex-water", "yorkshire-water", "south-west-water", "dwr-cymru",
+}
+
 func poll() {
 	start := time.Now()
 	log.Println("[POLL] Starting poll cycle")
 	var assets []Asset
-	twassets, err := fetch("thames-water")
-	if err != nil {
-		log.Println("thames-water fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from thames-water\n", len(twassets))
-		assets = append(assets, twassets...)
-	}
-	swassets, err := fetch("southern-water")
-	if err != nil {
-		log.Println("southern-water fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from southern-water\n", len(swassets))
-		assets = append(assets, swassets...)
-	}
-	uuassets, err := fetch("united-utilities")
-	if err != nil {
-		log.Println("united-utilities fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from united-utilities\n", len(uuassets))
-		assets = append(assets, uuassets...)
-	}
-	awassets, err := fetch("anglian-water")
-	if err != nil {
-		log.Println("anglian-water fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from anglian-water\n", len(awassets))
-		assets = append(assets, awassets...)
-	}
-	nwassets, err := fetch("northumbrian-water")
-	if err != nil {
-		log.Println("northumbrian-water fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from northumbrian-water\n", len(nwassets))
-		assets = append(assets, nwassets...)
-	}
-	stwassets, err := fetch("severn-trent-water")
-	if err != nil {
-		log.Println("severn-trent-water fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from severn-trent-water\n", len(stwassets))
-		assets = append(assets, stwassets...)
-	}
-	wwassets, err := fetch("wessex-water")
-	if err != nil {
-		log.Println("wessex-water fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from wessex-water\n", len(wwassets))
-		assets = append(assets, wwassets...)
-	}
-	ywassets, err := fetch("yorkshire-water")
-	if err != nil {
-		log.Println("yorkshire-water fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from yorkshire-water\n", len(ywassets))
-		assets = append(assets, ywassets...)
-	}
-	swwassets, err := fetch("south-west-water")
-	if err != nil {
-		log.Println("south-west-water fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from south-west-water\n", len(swwassets))
-		assets = append(assets, swwassets...)
-	}
-	dwrassets, err := fetch("dwr-cymru")
-	if err != nil {
-		log.Println("dwr-cymru fetch failed:", err)
-	} else {
-		log.Printf("[POLL] Fetched %d assets from dwr-cymru\n", len(dwrassets))
-		assets = append(assets, dwrassets...)
+	// Whether every feed came back with assets this poll.
+	allFetched := true
+	for _, company := range arcgisCompanies {
+		companyAssets, err := fetch(company)
+		if err != nil {
+			log.Println(company+" fetch failed:", err)
+			allFetched = false
+			continue
+		}
+		log.Printf("[POLL] Fetched %d assets from %s\n", len(companyAssets), company)
+		allFetched = allFetched && len(companyAssets) > 0
+		assets = append(assets, companyAssets...)
 	}
 	scowassets, err := fetchPageScottishWater()
 	if err != nil {
 		log.Println("scottish-water fetch failed:", err)
+		allFetched = false
 	} else {
 		log.Printf("[POLL] Fetched %d assets from scottish-water\n", len(scowassets))
+		allFetched = allFetched && len(scowassets) > 0
 		assets = append(assets, scowassets...)
 	}
 	assets = dedupeAssets(assets)
@@ -193,7 +144,95 @@ func poll() {
 		seen[asset.AssetID] = observation{Status: asset.Status, EventStart: msPtrToTime(asset.LatestEventStart)}
 	}
 	lastPoll = seen
+	err = flagRemovedAssets(assets, allFetched, time.Now().UTC())
+	if err != nil {
+		log.Println("flagRemovedAssets failed:", err)
+	}
 	log.Printf("[POLL] Completed in %s\n", time.Since(start))
+}
+
+// removedAfter is how long an asset has to be missing from its company's feed
+// before it's flagged as removed.
+const removedAfter = 24 * time.Hour
+
+// missingSince is when each asset was first found missing from its company's
+// feed. It's in memory, so a restart just restarts the clock.
+var missingSince = map[string]time.Time{}
+
+// flagRemovedAssets sets assets.asset_removed for assets that have dropped out
+// of their company's feed, so the site can stop showing them. upsertAssets
+// clears the flag if one comes back, so a feed that's wrong for a day only
+// hides assets until it recovers.
+func flagRemovedAssets(assets []Asset, allFetched bool, now time.Time) error {
+	rows, err := db.Query("SELECT asset_id, COALESCE(company, '') FROM assets WHERE asset_removed IS NOT TRUE")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	known := make(map[string][]string)
+	for rows.Next() {
+		var assetID string
+		var company string
+		err = rows.Scan(&assetID, &company)
+		if err != nil {
+			return err
+		}
+		known[company] = append(known[company], assetID)
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+
+	removed := findRemovedAssets(assets, known, allFetched, now)
+	if len(removed) == 0 {
+		return nil
+	}
+	log.Printf("[REMOVED] Flagging %d assets that have left their feeds, e.g. %v\n", len(removed), removed[:min(len(removed), 20)])
+	err = execForAssets("UPDATE assets SET asset_removed = TRUE WHERE asset_id IN ", removed)
+	if err != nil {
+		return err
+	}
+	for _, assetID := range removed {
+		delete(missingSince, assetID)
+	}
+	return nil
+}
+
+// findRemovedAssets compares this poll's assets with the ones we know of
+// (company -> asset IDs not yet flagged) and returns those that have been
+// missing from their company's feed for at least removedAfter. A company is
+// only judged when its fetch came back with assets: a failed fetch never
+// removes anything. Rows under a company name no feed returns any more (the
+// feed renamed itself) are judged only when every feed came back.
+func findRemovedAssets(assets []Asset, known map[string][]string, allFetched bool, now time.Time) []string {
+	fetched := make(map[string]bool)
+	present := make(map[string]bool, len(assets))
+	for _, asset := range assets {
+		fetched[asset.Company] = true
+		present[asset.AssetID] = true
+	}
+
+	var removed []string
+	for company, assetIDs := range known {
+		if !fetched[company] && !allFetched {
+			continue
+		}
+		for _, assetID := range assetIDs {
+			if present[assetID] {
+				delete(missingSince, assetID)
+				continue
+			}
+			since, ok := missingSince[assetID]
+			if !ok {
+				missingSince[assetID] = now
+				continue
+			}
+			if now.Sub(since) >= removedAfter {
+				removed = append(removed, assetID)
+			}
+		}
+	}
+	return removed
 }
 
 // lastPoll is what the previous poll saw in each feed. It's empty after a
@@ -500,13 +539,15 @@ func upsertAssetChunk(assets []Asset) error {
 		placeholders[i] = "(?, ?, ?, ?, ?, ?)"
 	}
 	// Keep details current when a company moves or renames an asset, but don't
-	// let a blank value in one poll wipe out a good one.
+	// let a blank value in one poll wipe out a good one. Anything in a feed
+	// isn't removed, so clear the flag if it had been set.
 	query := "INSERT INTO assets (asset_id, company, receiving_watercourse, latitude, longitude, first_seen) VALUES " + strings.Join(placeholders, ",") +
 		" ON DUPLICATE KEY UPDATE" +
 		" company = COALESCE(NULLIF(VALUES(company), ''), company)," +
 		" receiving_watercourse = COALESCE(NULLIF(VALUES(receiving_watercourse), ''), receiving_watercourse)," +
 		" latitude = IF(VALUES(latitude) = 0 OR VALUES(longitude) = 0, latitude, VALUES(latitude))," +
-		" longitude = IF(VALUES(latitude) = 0 OR VALUES(longitude) = 0, longitude, VALUES(longitude))"
+		" longitude = IF(VALUES(latitude) = 0 OR VALUES(longitude) = 0, longitude, VALUES(longitude))," +
+		" asset_removed = FALSE"
 
 	var args []interface{}
 	for _, asset := range assets {
@@ -884,6 +925,12 @@ func updateNearestBathingWater() error {
 // clearNearestBathingWater removes stale matches from assets that no longer
 // have a bathing water within range (it moved, or the asset did).
 func clearNearestBathingWater(assetIDs []string) error {
+	return execForAssets("UPDATE assets SET nearest_bw_id = NULL, nearest_bw_name = NULL, nearest_bw_classification = NULL, nearest_bw_distance_m = NULL WHERE nearest_bw_id IS NOT NULL AND asset_id IN ", assetIDs)
+}
+
+// execForAssets runs query, which must end in "asset_id IN ", for assetIDs in
+// chunks of 1000.
+func execForAssets(query string, assetIDs []string) error {
 	chunkSize := 1000
 	for i := 0; i < len(assetIDs); i += chunkSize {
 		chunk := assetIDs[i:min(i+chunkSize, len(assetIDs))]
@@ -892,7 +939,7 @@ func clearNearestBathingWater(assetIDs []string) error {
 		for j, id := range chunk {
 			args[j] = id
 		}
-		_, err := db.Exec("UPDATE assets SET nearest_bw_id = NULL, nearest_bw_name = NULL, nearest_bw_classification = NULL, nearest_bw_distance_m = NULL WHERE nearest_bw_id IS NOT NULL AND asset_id IN ("+placeholders+")", args...)
+		_, err := db.Exec(query+"("+placeholders+")", args...)
 		if err != nil {
 			return err
 		}
