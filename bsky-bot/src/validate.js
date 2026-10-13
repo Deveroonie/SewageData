@@ -31,6 +31,8 @@ export default function validate(lists) {
 // endedType decides what to do with a notification whose end hasn't been posted:
 // "ended" posts it, "closed" marks it done without posting, null waits.
 function endedType(notification) {
+    // The asset has left its company's feed; its state won't change again.
+    if (notification.asset_removed) return "closed"
     // Still the asset's current event and still discharging.
     if (notification.is_current_event && notification.status == 1) return null
     if (notification.latest_event_end) {

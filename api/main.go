@@ -82,6 +82,7 @@ func getAssets(c *gin.Context) {
         l.latest_event_end
     FROM assets a
     INNER JOIN latest_state l ON l.asset_id = a.asset_id
+    WHERE a.asset_removed IS NOT TRUE
 `)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -224,22 +225,22 @@ ORDER BY event_start DESC`, assetId)
 func getStats(c *gin.Context) {
 	var stats Stats
 
-	// Total assets
-	err := db.QueryRow("SELECT COUNT(*) FROM assets").Scan(&stats.TotalAssets)
+	// Total assets (removed ones have left their company's feed)
+	err := db.QueryRow("SELECT COUNT(*) FROM assets WHERE asset_removed IS NOT TRUE").Scan(&stats.TotalAssets)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Total discharging
-	err = db.QueryRow("SELECT COUNT(*) FROM latest_state WHERE status = 1").Scan(&stats.TotalDischarging)
+	err = db.QueryRow("SELECT COUNT(*) FROM latest_state WHERE status = 1 AND asset_id NOT IN (SELECT asset_id FROM assets WHERE asset_removed)").Scan(&stats.TotalDischarging)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Total offline
-	err = db.QueryRow("SELECT COUNT(*) FROM latest_state WHERE status = -1").Scan(&stats.TotalOffline)
+	err = db.QueryRow("SELECT COUNT(*) FROM latest_state WHERE status = -1 AND asset_id NOT IN (SELECT asset_id FROM assets WHERE asset_removed)").Scan(&stats.TotalOffline)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -253,6 +254,7 @@ func getStats(c *gin.Context) {
     ROUND(SUM(CASE WHEN l.status = 1 THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) as percent_active
 FROM assets a
 LEFT JOIN latest_state l ON a.asset_id = l.asset_id
+WHERE a.asset_removed IS NOT TRUE
 GROUP BY a.company
 ORDER BY percent_active DESC`)
 
@@ -284,6 +286,7 @@ func getTopDischarges(c *gin.Context) {
 FROM assets a
 INNER JOIN latest_state l ON l.asset_id = a.asset_id
 WHERE l.status = 1
+AND a.asset_removed IS NOT TRUE
 ORDER BY l.latest_event_start
 LIMIT 20
 `)
