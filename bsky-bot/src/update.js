@@ -19,6 +19,9 @@ export default async function update(dischargeInfo) {
                 )
                 break;
             }
+            case "closed":
+                console.log(`[UPDATE] ${discharge.asset_id}: event starting ${discharge.latest_event_start} ended at an unknown time; closing its notification without a post`)
+                // falls through
             case "ended": {
                 await connection.execute(
                     `UPDATE ${table} SET notified_end = 1 WHERE asset_id = ? AND event_start = ?`,

@@ -7,6 +7,7 @@ async function getActiveDischarges() {
     SELECT 
         ls.asset_id,
         ls.latest_event_start,
+        ls.latest_event_end,
         ls.polled_at,
         a.company,
         a.receiving_watercourse,
@@ -32,11 +33,21 @@ async function getActiveDischarges() {
     return rows
 }
 
+// Each notification is about one event (asset_id + event_start), which may no
+// longer be the asset's current event. Its end comes from events (reported, or
+// inferred by the fetcher when a discharge stops without one) or, while it's
+// still the current event, from latest_state.
 async function getPendingNotifications() {
     const [rows] = await connection.query(`
-    SELECT dn.*, 
+    SELECT dn.*,
            dn.event_start AS latest_event_start,
-           ls.latest_event_end,
+           COALESCE(
+               (SELECT MAX(e.event_end) FROM events e
+                WHERE e.asset_id = dn.asset_id AND e.event_start = dn.event_start),
+               IF(ls.latest_event_start <=> dn.event_start, ls.latest_event_end, NULL)
+           ) AS latest_event_end,
+           ls.status,
+           (ls.latest_event_start <=> dn.event_start) AS is_current_event,
            a.company,
            a.nearest_bw_name,
            a.nearest_bw_classification,
