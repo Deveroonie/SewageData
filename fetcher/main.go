@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -19,6 +20,19 @@ import (
 )
 
 var db *sql.DB
+
+// httpClient is shared by every fetch. The timeout stops one stalled upstream
+// from hanging the poll loop forever.
+var httpClient = &http.Client{Timeout: 60 * time.Second}
+
+// loggedOnce stops data problems that repeat on every poll from flooding the log.
+var loggedOnce sync.Map
+
+func logOnce(key string, format string, args ...any) {
+	if _, seen := loggedOnce.LoadOrStore(key, true); !seen {
+		log.Printf(format, args...)
+	}
+}
 
 func main() {
 	var config Config
@@ -150,6 +164,7 @@ func poll() {
 		log.Printf("[POLL] Fetched %d assets from scottish-water\n", len(scowassets))
 		assets = append(assets, scowassets...)
 	}
+	assets = dedupeAssets(assets)
 	err = upsertAssets(assets)
 	if err != nil {
 		log.Println("upsertAssets failed:", err)
@@ -166,6 +181,27 @@ func poll() {
 		}
 	}
 	log.Printf("[POLL] Completed in %s\n", time.Since(start))
+}
+
+// dedupeAssets drops repeated asset IDs, keeping the first. Some feeds list the
+// same asset twice, and both copies would otherwise be compared against the
+// same stored state and overwrite each other.
+func dedupeAssets(assets []Asset) []Asset {
+	seen := make(map[string]bool, len(assets))
+	deduped := assets[:0]
+	dupes := 0
+	for _, asset := range assets {
+		if seen[asset.AssetID] {
+			dupes++
+			continue
+		}
+		seen[asset.AssetID] = true
+		deduped = append(deduped, asset)
+	}
+	if dupes > 0 {
+		log.Printf("[POLL] Skipped %d duplicate asset IDs\n", dupes)
+	}
+	return deduped
 }
 
 func fetchConfig(path string) Config {
@@ -351,6 +387,10 @@ func fetch(company string) ([]Asset, error) {
 		return nil, errors.New("unknown company: " + company)
 	}
 
+	return fetchAllPages(url, company)
+}
+
+func fetchAllPages(url string, company string) ([]Asset, error) {
 	var all []Asset
 	offset := 0
 	for {
@@ -362,13 +402,18 @@ func fetch(company string) ([]Asset, error) {
 		if !overlimit {
 			break
 		}
-		offset += 1000
+		if len(page) == 0 {
+			return nil, errors.New("exceededTransferLimit set on an empty page")
+		}
+		// Advance by what the server actually returned: it can cap pages below
+		// the 1000 we ask for.
+		offset += len(page)
 	}
 	return all, nil
 }
 
 func fetchPage(url string, offset int, company string) (assets []Asset, err error, overLimit bool) {
-	resp, err := http.Get(url + "&resultOffset=" + strconv.Itoa(offset) + "&resultRecordCount=1000")
+	resp, err := httpClient.Get(url + "&resultOffset=" + strconv.Itoa(offset) + "&resultRecordCount=1000")
 	if err != nil {
 		return nil, err, false
 	}
@@ -381,6 +426,14 @@ func fetchPage(url string, offset int, company string) (assets []Asset, err erro
 	if err != nil {
 		log.Println(err)
 		return nil, err, false
+	}
+	// ArcGIS reports most failures as HTTP 200 with an "error" object and no
+	// features, which would otherwise look like an empty (or final) page.
+	var errResp struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(body, &errResp) == nil && len(errResp.Error) > 0 && string(errResp.Error) != "null" {
+		return nil, fmt.Errorf("arcgis error: %s", errResp.Error), false
 	}
 	if company == "south-west-water" {
 		var result SWWArcGISResponse
@@ -428,7 +481,7 @@ func fetchPage(url string, offset int, company string) (assets []Asset, err erro
 }
 
 func fetchPageScottishWater() (assets []Asset, err error) {
-	resp, err := http.Get("https://api.scottishwater.co.uk/overflow-event-monitoring/v1/near-real-time")
+	resp, err := httpClient.Get("https://api.scottishwater.co.uk/overflow-event-monitoring/v1/near-real-time")
 	if err != nil {
 		return nil, err
 	}
@@ -476,8 +529,42 @@ func updateBathingWater() {
 	log.Println("[POLL] Finished bathing water cycle in ", time.Since(start))
 }
 
+var bathingWaterURL = "https://environment.data.gov.uk/doc/bathing-water.json?_pageSize=500&_view=bathing-water"
+
+// maxBathingWaterPages guards against a misbehaving API linking pages forever.
+const maxBathingWaterPages = 50
+
 func fetchBathingWaters() ([]BathingWater, error) {
-	resp, err := http.Get("https://environment.data.gov.uk/doc/bathing-water.json?_pageSize=500&_view=bathing-water")
+	var returnres []BathingWater
+
+	// The EA API pages its results; keep going while it links a next page.
+	for page := 0; ; page++ {
+		if page == maxBathingWaterPages {
+			return nil, fmt.Errorf("bathing waters: gave up after %d pages", page)
+		}
+		result, err := fetchBathingWaterPage(page)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, item := range result.Result.Items {
+			bw := item.ToBathingWater()
+			if bw.Lat == 0 || bw.Long == 0 {
+				continue
+			}
+			returnres = append(returnres, bw)
+		}
+
+		if result.Result.Next == "" || len(result.Result.Items) == 0 {
+			break
+		}
+	}
+
+	return returnres, nil
+}
+
+func fetchBathingWaterPage(page int) (*EABathingWaterResponse, error) {
+	resp, err := httpClient.Get(bathingWaterURL + "&_page=" + strconv.Itoa(page))
 	if err != nil {
 		return nil, err
 	}
@@ -492,22 +579,10 @@ func fetchBathingWaters() ([]BathingWater, error) {
 	}
 	var result EABathingWaterResponse
 	err = json.Unmarshal(body, &result)
-
 	if err != nil {
 		return nil, err
 	}
-
-	var returnres []BathingWater
-
-	for _, item := range result.Result.Items {
-		bw := item.ToBathingWater()
-		if bw.Lat == 0 || bw.Long == 0 {
-			continue
-		}
-		returnres = append(returnres, bw)
-	}
-
-	return returnres, nil
+	return &result, nil
 }
 
 func upsertBathingWaters(bathingWaters []BathingWater) error {
@@ -684,8 +759,10 @@ func DWRStatusToStatus(dwrstatus string) int {
 		return 1
 	case "Overflow Not Operating (Has in the last 24 hours)":
 		return 0
+	case "Under Investigation":
+		return -1
 	default:
-		println("Unknown status: " + dwrstatus)
+		logOnce("dwr-status:"+dwrstatus, "Unknown DWR status: %q", dwrstatus)
 		return -1
 	}
 }
@@ -718,32 +795,40 @@ func parseISOToMillis(s *string) *int64 {
 			return &ms
 		}
 	}
-	log.Println("parseISOToMillis failed:", *s)
+	logOnce("dwr-time:"+*s, "parseISOToMillis failed: %s", *s)
 	return nil
 }
-func parseISOToMillisSWPtr(s *string) *int64 {
-	if s == nil {
+
+// parseSWTime parses a Scottish Water timestamp such as
+// "2026-10-13T16:45:00.000Z". They send "" when there's no value.
+func parseSWTime(s string) *int64 {
+	if s == "" {
 		return nil
 	}
-	t, err := time.Parse("2006-01-02T15:04:05.000Z", *s)
+	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
+		logOnce("sw-time:"+s, "Unparseable Scottish Water timestamp: %q", s)
 		return nil
 	}
 	ms := t.UnixMilli()
 	return &ms
 }
-func parseISOToMillisSW(s string) int64 {
-	t, err := time.Parse("2006-01-02T15:04:05.000Z", s)
-	if err != nil {
-		return 0
+func parseISOToMillisSWPtr(s *string) *int64 {
+	if s == nil {
+		return nil
 	}
-	ms := t.UnixMilli()
-	return ms
+	return parseSWTime(*s)
+}
+func parseISOToMillisSW(s string) int64 {
+	if ms := parseSWTime(s); ms != nil {
+		return *ms
+	}
+	return 0
 }
 func parseCoordsSW(s string) float64 {
 	data, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		log.Println("Error parsing coordinates: ", err)
+		logOnce("sw-coords:"+s, "Error parsing coordinates: %v", err)
 		return 0
 	}
 	return data
@@ -866,6 +951,7 @@ type LatestState struct {
 type EABathingWaterResponse struct {
 	Result struct {
 		Items []EABathingWaterItem `json:"items"`
+		Next  string               `json:"next"`
 	} `json:"result"`
 }
 
